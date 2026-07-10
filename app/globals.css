@@ -412,6 +412,10 @@ table {
   min-width: 720px;
 }
 
+.duplicateIpTable table {
+  min-width: 520px;
+}
+
 .watchlistTable table {
   min-width: 1120px;
 }

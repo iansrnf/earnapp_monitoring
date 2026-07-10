@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, Check, FileUp, History, Pencil, RefreshCw, Save, Search, Smartphone, Trash2, X } from "lucide-react";
+import { CalendarDays, Check, Copy, FileUp, History, Pencil, RefreshCw, Save, Search, Smartphone, Trash2, X } from "lucide-react";
 import {
   EARNAPP_COOKIE_STORAGE_KEY,
   EARNAPP_COOKIE_NEVER_EXPIRES_AT,
@@ -46,6 +46,12 @@ type UsageRow = {
   point: EarnAppUsagePoint;
 };
 
+type DuplicateIpRow = {
+  key: string;
+  device: EarnAppDevice;
+  ip: string;
+};
+
 type ForecastRow = {
   device: EarnAppDevice;
   days: number;
@@ -84,7 +90,7 @@ type WatchlistRow = {
   status: WatchlistStatus;
 };
 
-type Tab = "groups" | "devices" | "forecast" | "watchlist" | "usage";
+type Tab = "groups" | "devices" | "ip-duplication" | "forecast" | "watchlist" | "usage";
 type SortDirection = "asc" | "desc";
 type SortConfig = {
   tab: Tab;
@@ -954,6 +960,34 @@ export default function EarnappDevicesPage() {
     return rows.sort((first, second) => second.point.date.localeCompare(first.point.date));
   }, [filteredDevices, getDeviceUsage]);
 
+  const duplicateIpRows = useMemo<DuplicateIpRow[]>(() => {
+    const devicesByIp = new Map<string, Map<string, EarnAppDevice>>();
+
+    filteredDevices.forEach((device, deviceIndex) => {
+      const deviceKey = device.uuid || `${device.title}-${deviceIndex}`;
+
+      device.ips.forEach((ip) => {
+        const normalizedIp = ip.trim().toLowerCase();
+
+        if (!normalizedIp) return;
+
+        const ipDevices = devicesByIp.get(normalizedIp) ?? new Map<string, EarnAppDevice>();
+        ipDevices.set(deviceKey, device);
+        devicesByIp.set(normalizedIp, ipDevices);
+      });
+    });
+
+    return Array.from(devicesByIp.entries()).flatMap(([ip, ipDevices]) =>
+      ipDevices.size > 1
+        ? Array.from(ipDevices.entries()).map(([deviceKey, device]) => ({
+            key: `${ip}-${deviceKey}`,
+            device,
+            ip,
+          }))
+        : [],
+    );
+  }, [filteredDevices]);
+
   const watchlistRows = useMemo<WatchlistRow[]>(() => {
     return filteredDevices
       .map((device) => {
@@ -1078,6 +1112,16 @@ export default function EarnappDevicesPage() {
         return "";
       }),
     [sortConfig, usageRows],
+  );
+
+  const sortedDuplicateIpRows = useMemo(
+    () =>
+      sortRows(duplicateIpRows, sortConfig, "ip-duplication", (row, key) => {
+        if (key === "device") return row.device.title;
+        if (key === "ip") return row.ip;
+        return "";
+      }),
+    [duplicateIpRows, sortConfig],
   );
 
   const sortedWatchlistRows = useMemo(
@@ -1266,23 +1310,27 @@ export default function EarnappDevicesPage() {
         </div>
 
         <div className="tabs" role="tablist" aria-label="Earnapp views">
-          <button type="button" className={`tab ${tab === "groups" ? "active" : ""}`} onClick={() => setTab("groups")} aria-selected={tab === "groups"}>
+          <button type="button" role="tab" className={`tab ${tab === "groups" ? "active" : ""}`} onClick={() => setTab("groups")} aria-selected={tab === "groups"}>
             <Smartphone size={16} />
             <span>Groups {groupedDevices.length}</span>
           </button>
-          <button type="button" className={`tab ${tab === "devices" ? "active" : ""}`} onClick={() => setTab("devices")} aria-selected={tab === "devices"}>
+          <button type="button" role="tab" className={`tab ${tab === "devices" ? "active" : ""}`} onClick={() => setTab("devices")} aria-selected={tab === "devices"}>
             <Smartphone size={16} />
             <span>Devices {filteredDevices.length}</span>
           </button>
-          <button type="button" className={`tab ${tab === "forecast" ? "active" : ""}`} onClick={() => setTab("forecast")} aria-selected={tab === "forecast"}>
+          <button type="button" role="tab" className={`tab ${tab === "ip-duplication" ? "active" : ""}`} onClick={() => setTab("ip-duplication")} aria-selected={tab === "ip-duplication"}>
+            <Copy size={16} />
+            <span>IP Check Duplication {duplicateIpRows.length}</span>
+          </button>
+          <button type="button" role="tab" className={`tab ${tab === "forecast" ? "active" : ""}`} onClick={() => setTab("forecast")} aria-selected={tab === "forecast"}>
             <CalendarDays size={16} />
             <span>Forecast</span>
           </button>
-          <button type="button" className={`tab ${tab === "watchlist" ? "active" : ""}`} onClick={() => setTab("watchlist")} aria-selected={tab === "watchlist"}>
+          <button type="button" role="tab" className={`tab ${tab === "watchlist" ? "active" : ""}`} onClick={() => setTab("watchlist")} aria-selected={tab === "watchlist"}>
             <Check size={16} />
             <span>Watchlist {watchlistFailedCount + watchlistPendingCount}</span>
           </button>
-          <button type="button" className={`tab ${tab === "usage" ? "active" : ""}`} onClick={() => setTab("usage")} aria-selected={tab === "usage"}>
+          <button type="button" role="tab" className={`tab ${tab === "usage" ? "active" : ""}`} onClick={() => setTab("usage")} aria-selected={tab === "usage"}>
             <History size={16} />
             <span>Usage</span>
           </button>
@@ -1614,6 +1662,45 @@ export default function EarnappDevicesPage() {
                             <Trash2 size={16} />
                           </button>
                         </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ) : tab === "ip-duplication" ? (
+          <section className="earnAppSection" aria-label="Duplicate device IP addresses">
+            <div className="sectionHeader">
+              <div>
+                <h2>IP Check Duplication</h2>
+                <p>Devices that share the same IP address with at least one other device.</p>
+              </div>
+            </div>
+            <div className="tableWrap duplicateIpTable">
+              <table>
+                <thead>
+                  <tr>
+                    <th>{renderSortHeader("Device Name", "device")}</th>
+                    <th>{renderSortHeader("IP Address", "ip")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedDuplicateIpRows.length === 0 ? (
+                    <tr>
+                      <td className="empty" colSpan={2}>
+                        {devices.length > 0 ? "No duplicate IP addresses found." : "Paste a cookie and load devices."}
+                      </td>
+                    </tr>
+                  ) : (
+                    sortedDuplicateIpRows.map((row) => (
+                      <tr key={row.key}>
+                        <td>
+                          <div className="deviceName">
+                            <strong>{row.device.title || "Unnamed device"}</strong>
+                          </div>
+                        </td>
+                        <td className="mono">{row.ip}</td>
                       </tr>
                     ))
                   )}
