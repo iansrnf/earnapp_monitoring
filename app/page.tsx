@@ -90,7 +90,8 @@ type WatchlistRow = {
   status: WatchlistStatus;
 };
 
-type Tab = "groups" | "devices" | "ip-duplication" | "ip-check" | "forecast" | "watchlist" | "usage";
+type Tab = "groups" | "devices" | "ip-duplication" | "ip-check" | "vsphone" | "forecast" | "watchlist" | "usage";
+type VsPhoneAction = "userPadList" | "replacement";
 type SortDirection = "asc" | "desc";
 type SortConfig = {
   tab: Tab;
@@ -427,6 +428,16 @@ export default function EarnappDevicesPage() {
   const [tab, setTab] = useState<Tab>("groups");
   const [ipCheckInput, setIpCheckInput] = useState("");
   const [checkedIp, setCheckedIp] = useState<string | null>(null);
+  const [vsPhoneAction, setVsPhoneAction] = useState<VsPhoneAction>("userPadList");
+  const [vsPhoneMode, setVsPhoneMode] = useState<"manual" | "automatic">("manual");
+  const [vsPhoneAccessKey, setVsPhoneAccessKey] = useState("");
+  const [vsPhoneSecretKey, setVsPhoneSecretKey] = useState("");
+  const [vsPhonePadCode, setVsPhonePadCode] = useState("");
+  const [vsPhoneEquipmentIds, setVsPhoneEquipmentIds] = useState("");
+  const [vsPhoneIntervalSeconds, setVsPhoneIntervalSeconds] = useState(60);
+  const [vsPhoneLoading, setVsPhoneLoading] = useState(false);
+  const [vsPhoneError, setVsPhoneError] = useState<string | null>(null);
+  const [vsPhoneResult, setVsPhoneResult] = useState<unknown>(null);
   const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
   const [forecastDate, setForecastDate] = useState(getTodayDateInputValue);
   const [selectedDeviceUuids, setSelectedDeviceUuids] = useState<string[]>([]);
@@ -480,6 +491,53 @@ export default function EarnappDevicesPage() {
     setCookie(nextCookie);
     setEditingCookie(false);
   }, []);
+
+  const sendVsPhoneRequest = useCallback(async () => {
+    setVsPhoneLoading(true);
+    setVsPhoneError(null);
+
+    try {
+      const equipmentIds = vsPhoneEquipmentIds
+        .split(",")
+        .map((value) => Number(value.trim()))
+        .filter((value) => Number.isInteger(value));
+      const response = await fetch("/api/vsphone", {
+        method: "POST",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: vsPhoneAction,
+          accessKey: vsPhoneAccessKey,
+          secretKey: vsPhoneSecretKey,
+          padCode: vsPhonePadCode,
+          equipmentIds,
+        }),
+      });
+      const result = (await response.json()) as { error?: string };
+
+      setVsPhoneResult(result);
+
+      if (!response.ok) {
+        setVsPhoneError(result.error ?? `VSPhone request failed with status ${response.status}.`);
+      }
+    } catch (requestError) {
+      setVsPhoneError(requestError instanceof Error ? requestError.message : "Failed to call VSPhone.");
+    } finally {
+      setVsPhoneLoading(false);
+    }
+  }, [vsPhoneAccessKey, vsPhoneAction, vsPhoneEquipmentIds, vsPhonePadCode, vsPhoneSecretKey]);
+
+  useEffect(() => {
+    if (vsPhoneMode !== "automatic" || vsPhoneAction !== "userPadList" || !vsPhoneAccessKey.trim() || !vsPhoneSecretKey.trim()) return;
+
+    const initialRequest = window.setTimeout(() => void sendVsPhoneRequest(), 0);
+    const interval = window.setInterval(() => void sendVsPhoneRequest(), Math.max(10, vsPhoneIntervalSeconds) * 1000);
+
+    return () => {
+      window.clearTimeout(initialRequest);
+      window.clearInterval(interval);
+    };
+  }, [sendVsPhoneRequest, vsPhoneAccessKey, vsPhoneAction, vsPhoneIntervalSeconds, vsPhoneMode, vsPhoneSecretKey]);
 
   useEffect(() => {
     window.queueMicrotask(() => {
@@ -1340,6 +1398,10 @@ export default function EarnappDevicesPage() {
             <Search size={16} />
             <span>IP Check</span>
           </button>
+          <button type="button" role="tab" className={`tab ${tab === "vsphone" ? "active" : ""}`} onClick={() => setTab("vsphone")} aria-selected={tab === "vsphone"}>
+            <Smartphone size={16} />
+            <span>VSPhone</span>
+          </button>
           <button type="button" role="tab" className={`tab ${tab === "forecast" ? "active" : ""}`} onClick={() => setTab("forecast")} aria-selected={tab === "forecast"}>
             <CalendarDays size={16} />
             <span>Forecast</span>
@@ -1354,7 +1416,96 @@ export default function EarnappDevicesPage() {
           </button>
         </div>
 
-        {tab === "forecast" ? (
+        {tab === "vsphone" ? (
+          <section className="earnAppSection" aria-label="VSPhone API requests">
+            <div className="sectionHeader">
+              <div>
+                <h2>VSPhone</h2>
+                <p>Send signed V2 API requests manually or automatically. Credentials are sent only to this app&apos;s server proxy.</p>
+              </div>
+              <span className={`forecastBadge ${vsPhoneMode === "automatic" ? "actual" : "estimated"}`}>
+                {vsPhoneMode === "automatic" ? "Automatic" : "Manual"}
+              </span>
+            </div>
+
+            <div className="vsPhoneGrid">
+              <label>
+                <span>API Request</span>
+                <select value={vsPhoneAction} onChange={(event) => {
+                  const nextAction = event.target.value as VsPhoneAction;
+                  setVsPhoneAction(nextAction);
+                  if (nextAction === "replacement") setVsPhoneMode("manual");
+                }}>
+                  <option value="userPadList">Cloud Phone List — POST /userPadList</option>
+                  <option value="replacement">Device Replacement — POST /replacement</option>
+                </select>
+              </label>
+              <label>
+                <span>Request Mode</span>
+                <select value={vsPhoneMode} onChange={(event) => setVsPhoneMode(event.target.value as "manual" | "automatic")}>
+                  <option value="manual">Manual</option>
+                  <option value="automatic" disabled={vsPhoneAction === "replacement"}>Automatic polling</option>
+                </select>
+              </label>
+              <label>
+                <span>Access Key (AK)</span>
+                <input type="text" value={vsPhoneAccessKey} onChange={(event) => setVsPhoneAccessKey(event.target.value)} placeholder="ak_xxxxxxxxxxxx" autoComplete="off" />
+              </label>
+              <label>
+                <span>Secret Key (SK)</span>
+                <input type="password" value={vsPhoneSecretKey} onChange={(event) => setVsPhoneSecretKey(event.target.value)} placeholder="Secret Access Key" autoComplete="new-password" />
+              </label>
+              <label>
+                <span>Pad Code {vsPhoneAction === "replacement" ? "(required)" : "(optional)"}</span>
+                <input type="text" value={vsPhonePadCode} onChange={(event) => setVsPhonePadCode(event.target.value)} placeholder="AC32010030001" />
+              </label>
+              {vsPhoneAction === "userPadList" ? (
+                <label>
+                  <span>Equipment IDs (optional)</span>
+                  <input type="text" value={vsPhoneEquipmentIds} onChange={(event) => setVsPhoneEquipmentIds(event.target.value)} placeholder="106626, 106627" />
+                </label>
+              ) : null}
+              {vsPhoneMode === "automatic" ? (
+                <label>
+                  <span>Poll Every (seconds)</span>
+                  <input type="number" min={10} value={vsPhoneIntervalSeconds} onChange={(event) => setVsPhoneIntervalSeconds(Math.max(10, Number(event.target.value) || 10))} />
+                </label>
+              ) : null}
+            </div>
+
+            <div className="vsPhoneActions">
+              {vsPhoneMode === "manual" ? (
+                <button
+                  type="button"
+                  className={`loadConfig ${vsPhoneAction === "replacement" ? "dangerButton" : ""}`}
+                  disabled={vsPhoneLoading || !vsPhoneAccessKey.trim() || !vsPhoneSecretKey.trim() || (vsPhoneAction === "replacement" && !vsPhonePadCode.trim())}
+                  onClick={() => {
+                    if (vsPhoneAction === "replacement" && !window.confirm(`Replace VSPhone device ${vsPhonePadCode.trim()}? This operation changes the device assignment.`)) return;
+                    void sendVsPhoneRequest();
+                  }}
+                >
+                  <RefreshCw size={17} className={vsPhoneLoading ? "spin" : ""} />
+                  {vsPhoneLoading ? "Requesting..." : "Send Request"}
+                </button>
+              ) : (
+                <span className="quietText">
+                  {vsPhoneAccessKey.trim() && vsPhoneSecretKey.trim()
+                    ? `Polling every ${vsPhoneIntervalSeconds} seconds. Change mode to Manual to stop.`
+                    : "Enter both API keys to start automatic polling."}
+                </span>
+              )}
+            </div>
+
+            {vsPhoneError ? <p className="errorMessage">{vsPhoneError}</p> : null}
+            <div className="vsPhoneResponse">
+              <div>
+                <strong>Response</strong>
+                {vsPhoneLoading ? <span>Request in progress…</span> : null}
+              </div>
+              <pre>{vsPhoneResult === null ? "No request sent yet." : JSON.stringify(vsPhoneResult, null, 2)}</pre>
+            </div>
+          </section>
+        ) : tab === "forecast" ? (
           <section className="earnAppSection" aria-label="Earnapp forecast">
             <div className="sectionHeader">
               <div>
