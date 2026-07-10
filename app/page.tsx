@@ -92,6 +92,17 @@ type WatchlistRow = {
 
 type Tab = "groups" | "devices" | "ip-duplication" | "ip-check" | "vsphone" | "forecast" | "watchlist" | "usage";
 type VsPhoneAction = "userPadList" | "replacement";
+type VsPhoneApiResult = {
+  error?: string;
+  data?: { msg?: unknown } | unknown;
+};
+
+function isVsPhoneSuccess(result: unknown) {
+  if (!result || typeof result !== "object" || !("data" in result)) return false;
+
+  const upstream = result.data;
+  return Boolean(upstream && typeof upstream === "object" && "msg" in upstream && upstream.msg === "success");
+}
 type SortDirection = "asc" | "desc";
 type SortConfig = {
   tab: Tab;
@@ -514,15 +525,18 @@ export default function EarnappDevicesPage() {
           equipmentIds,
         }),
       });
-      const result = (await response.json()) as { error?: string };
+      const result = (await response.json()) as VsPhoneApiResult;
 
       setVsPhoneResult(result);
 
       if (!response.ok) {
         setVsPhoneError(result.error ?? `VSPhone request failed with status ${response.status}.`);
       }
+
+      return result;
     } catch (requestError) {
       setVsPhoneError(requestError instanceof Error ? requestError.message : "Failed to call VSPhone.");
+      return null;
     } finally {
       setVsPhoneLoading(false);
     }
@@ -557,14 +571,31 @@ export default function EarnappDevicesPage() {
   }, []);
 
   useEffect(() => {
-    if (vsPhoneMode !== "automatic" || vsPhoneAction !== "userPadList" || (!vsPhoneCredentialsSaved && (!vsPhoneAccessKey.trim() || !vsPhoneSecretKey.trim()))) return;
+    if (vsPhoneMode !== "automatic" || (!vsPhoneCredentialsSaved && (!vsPhoneAccessKey.trim() || !vsPhoneSecretKey.trim()))) return;
 
-    const initialRequest = window.setTimeout(() => void sendVsPhoneRequest(), 0);
-    const interval = window.setInterval(() => void sendVsPhoneRequest(), Math.max(10, vsPhoneIntervalSeconds) * 1000);
+    let cancelled = false;
+    let timeout: number | undefined;
+
+    const scheduleRequest = () => {
+      timeout = window.setTimeout(async () => {
+        const result = await sendVsPhoneRequest();
+
+        if (cancelled) return;
+
+        if (vsPhoneAction === "replacement" && isVsPhoneSuccess(result)) {
+          setVsPhoneMode("manual");
+          return;
+        }
+
+        scheduleRequest();
+      }, Math.max(1, vsPhoneIntervalSeconds) * 1000);
+    };
+
+    scheduleRequest();
 
     return () => {
-      window.clearTimeout(initialRequest);
-      window.clearInterval(interval);
+      cancelled = true;
+      if (timeout !== undefined) window.clearTimeout(timeout);
     };
   }, [sendVsPhoneRequest, vsPhoneAccessKey, vsPhoneAction, vsPhoneCredentialsSaved, vsPhoneIntervalSeconds, vsPhoneMode, vsPhoneSecretKey]);
 
@@ -1463,7 +1494,7 @@ export default function EarnappDevicesPage() {
                 <select value={vsPhoneAction} onChange={(event) => {
                   const nextAction = event.target.value as VsPhoneAction;
                   setVsPhoneAction(nextAction);
-                  if (nextAction === "replacement") setVsPhoneMode("manual");
+                  setVsPhoneMode("manual");
                 }}>
                   <option value="userPadList">Cloud Phone List — POST /userPadList</option>
                   <option value="replacement">Device Replacement — POST /replacement</option>
@@ -1471,9 +1502,29 @@ export default function EarnappDevicesPage() {
               </label>
               <label>
                 <span>Request Mode</span>
-                <select value={vsPhoneMode} onChange={(event) => setVsPhoneMode(event.target.value as "manual" | "automatic")}>
+                <select
+                  value={vsPhoneMode}
+                  onChange={(event) => {
+                    const nextMode = event.target.value as "manual" | "automatic";
+
+                    if (nextMode === "automatic" && vsPhoneAction === "replacement") {
+                      if (!vsPhonePadCode.trim()) {
+                        window.alert("Enter the required Pad Code before starting automatic replacement.");
+                        return;
+                      }
+
+                      const confirmed = window.confirm(
+                        `Automatically request replacement for ${vsPhonePadCode.trim() || "this device"} every ${vsPhoneIntervalSeconds} second(s) until VSPhone returns data.msg = success?`,
+                      );
+
+                      if (!confirmed) return;
+                    }
+
+                    setVsPhoneMode(nextMode);
+                  }}
+                >
                   <option value="manual">Manual</option>
-                  <option value="automatic" disabled={vsPhoneAction === "replacement"}>Automatic polling</option>
+                  <option value="automatic">Automatic polling</option>
                 </select>
               </label>
               <label>
@@ -1496,8 +1547,8 @@ export default function EarnappDevicesPage() {
               ) : null}
               {vsPhoneMode === "automatic" ? (
                 <label>
-                  <span>Poll Every (seconds)</span>
-                  <input type="number" min={10} value={vsPhoneIntervalSeconds} onChange={(event) => setVsPhoneIntervalSeconds(Math.max(10, Number(event.target.value) || 10))} />
+                  <span>Delay Between Requests (seconds)</span>
+                  <input type="number" min={1} value={vsPhoneIntervalSeconds} onChange={(event) => setVsPhoneIntervalSeconds(Math.max(1, Number(event.target.value) || 1))} />
                 </label>
               ) : null}
             </div>
@@ -1528,7 +1579,9 @@ export default function EarnappDevicesPage() {
               ) : (
                 <span className="quietText">
                   {vsPhoneCredentialsSaved || (vsPhoneAccessKey.trim() && vsPhoneSecretKey.trim())
-                    ? `Polling every ${vsPhoneIntervalSeconds} seconds. Change mode to Manual to stop.`
+                    ? vsPhoneAction === "replacement"
+                      ? `Replacement starts after ${vsPhoneIntervalSeconds} second(s), repeats after each response, and stops when data.msg is success.`
+                      : `Polling every ${vsPhoneIntervalSeconds} seconds. Change mode to Manual to stop.`
                     : "Enter both API keys to start automatic polling."}
                 </span>
               )}
