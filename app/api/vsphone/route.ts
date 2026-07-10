@@ -51,7 +51,9 @@ function getV4Headers(accessKey: string, secretKey: string, body: string) {
     "content-type": V4_CONTENT_TYPE,
     "x-date": xDate,
     "x-host": V4_HOST,
-    authorization: `HMAC-SHA256 Credential=${accessKey}/${credentialScope}, SignedHeaders=${V4_SIGNED_HEADERS}, Signature=${signature}`,
+    // api.vsphone.com expects the host-specific legacy format with the bare AK.
+    // The credential scope remains part of StringToSign, but is not appended to Credential.
+    authorization: `HMAC-SHA256 Credential=${accessKey}, SignedHeaders=${V4_SIGNED_HEADERS}, Signature=${signature}`,
   };
 }
 
