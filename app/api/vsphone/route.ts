@@ -103,7 +103,10 @@ export async function POST(request: Request) {
   }
 
   const path = PATHS[action];
-  const payload = action === "replacement" ? { padCode } : { padCode: padCode || null, equipmentIds };
+  const payload: { padCode?: string; equipmentIds?: number[] } = {};
+
+  if (padCode) payload.padCode = padCode;
+  if (action === "userPadList" && equipmentIds.length > 0) payload.equipmentIds = equipmentIds;
   const body = JSON.stringify(payload);
   const timestamp = Math.floor(Date.now() / 1000).toString();
   const signature = createHash("sha256").update(`${secretKey}${timestamp}${path}${body}`, "utf8").digest("hex");
