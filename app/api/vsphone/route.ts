@@ -26,7 +26,7 @@ function hmac(key: string | Buffer, value: string) {
   return createHmac("sha256", key).update(value, "utf8").digest();
 }
 
-function getV4Headers(accessKey: string, secretKey: string, body: string) {
+function getV4Headers(accessKey: string, secretKey: string, body: string, contentType = V4_CONTENT_TYPE, scopedCredential = false) {
   const xDate = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
   const shortDate = xDate.slice(0, 8);
   const credentialScope = `${shortDate}/${V4_SERVICE}/request`;
@@ -34,7 +34,7 @@ function getV4Headers(accessKey: string, secretKey: string, body: string) {
   const canonicalRequest = [
     `host:${V4_HOST}`,
     `x-date:${xDate}`,
-    `content-type:${V4_CONTENT_TYPE}`,
+    `content-type:${contentType}`,
     `signedHeaders:${V4_SIGNED_HEADERS}`,
     `x-content-sha256:${bodyHash}`,
   ].join("\n");
@@ -48,13 +48,17 @@ function getV4Headers(accessKey: string, secretKey: string, body: string) {
   const signature = createHmac("sha256", signingKey).update(stringToSign, "utf8").digest("hex");
 
   return {
-    "content-type": V4_CONTENT_TYPE,
+    "content-type": contentType,
     "x-date": xDate,
     "x-host": V4_HOST,
-    // api.vsphone.com expects the host-specific legacy format with the bare AK.
-    // The credential scope remains part of StringToSign, but is not appended to Credential.
-    authorization: `HMAC-SHA256 Credential=${accessKey}, SignedHeaders=${V4_SIGNED_HEADERS}, Signature=${signature}`,
+    "x-content-sha256": bodyHash,
+    authorization: `HMAC-SHA256 Credential=${accessKey}${scopedCredential ? `/${credentialScope}` : ""}, SignedHeaders=${V4_SIGNED_HEADERS}, Signature=${signature}`,
   };
+}
+
+function getCookie(request: Request, name: string) {
+  const item = request.headers.get("cookie")?.split(";").map((value) => value.trim()).find((value) => value.startsWith(`${name}=`));
+  return item ? decodeURIComponent(item.slice(name.length + 1)) : "";
 }
 
 async function readResponse(response: Response) {
@@ -77,8 +81,10 @@ function needsV4Fallback(response: Response, data: unknown) {
 export async function POST(request: Request) {
   const input = (await request.json().catch(() => ({}))) as VsPhoneRequest;
   const action = input.action === "replacement" || input.action === "userPadList" ? input.action : null;
-  const accessKey = typeof input.accessKey === "string" ? input.accessKey.trim() : process.env.VSPHONE_ACCESS_KEY?.trim() ?? "";
-  const secretKey = typeof input.secretKey === "string" ? input.secretKey.trim() : process.env.VSPHONE_SECRET_KEY?.trim() ?? "";
+  const enteredAccessKey = typeof input.accessKey === "string" ? input.accessKey.trim() : "";
+  const enteredSecretKey = typeof input.secretKey === "string" ? input.secretKey.trim() : "";
+  const accessKey = enteredAccessKey || getCookie(request, "vsphone-ak") || process.env.VSPHONE_ACCESS_KEY?.trim() || "";
+  const secretKey = enteredSecretKey || getCookie(request, "vsphone-sk") || process.env.VSPHONE_SECRET_KEY?.trim() || "";
 
   if (!action) {
     return NextResponse.json({ error: "Select a supported VSPhone request." }, { status: 400 });
@@ -120,14 +126,26 @@ export async function POST(request: Request) {
     let data = await readResponse(response);
 
     if (needsV4Fallback(response, data)) {
-      authScheme = "V4 fallback";
-      response = await fetch(`${VSPHONE_BASE_URL}${path}`, {
-        method: "POST",
-        cache: "no-store",
-        headers: getV4Headers(accessKey, secretKey, body),
-        body,
-      });
-      data = await readResponse(response);
+      const v4Variants = [
+        { contentType: V4_CONTENT_TYPE, scoped: false, label: "V4 bare credential" },
+        { contentType: "application/json", scoped: false, label: "V4 bare credential/json" },
+        { contentType: V4_CONTENT_TYPE, scoped: true, label: "V4 scoped credential" },
+        { contentType: "application/json", scoped: true, label: "V4 scoped credential/json" },
+      ];
+
+      for (const variant of v4Variants) {
+        authScheme = variant.label;
+        response = await fetch(`${VSPHONE_BASE_URL}${path}`, {
+          method: "POST",
+          cache: "no-store",
+          headers: getV4Headers(accessKey, secretKey, body, variant.contentType, variant.scoped),
+          body,
+        });
+        data = await readResponse(response);
+
+        const result = data && typeof data === "object" ? data as { code?: unknown } : null;
+        if (response.ok || result?.code !== 2019) break;
+      }
     }
 
     const upstreamMessage = data && typeof data === "object" && "msg" in data && typeof data.msg === "string" ? data.msg : "";

@@ -432,6 +432,7 @@ export default function EarnappDevicesPage() {
   const [vsPhoneMode, setVsPhoneMode] = useState<"manual" | "automatic">("manual");
   const [vsPhoneAccessKey, setVsPhoneAccessKey] = useState("");
   const [vsPhoneSecretKey, setVsPhoneSecretKey] = useState("");
+  const [vsPhoneCredentialsSaved, setVsPhoneCredentialsSaved] = useState(false);
   const [vsPhonePadCode, setVsPhonePadCode] = useState("");
   const [vsPhoneEquipmentIds, setVsPhoneEquipmentIds] = useState("");
   const [vsPhoneIntervalSeconds, setVsPhoneIntervalSeconds] = useState(60);
@@ -527,8 +528,36 @@ export default function EarnappDevicesPage() {
     }
   }, [vsPhoneAccessKey, vsPhoneAction, vsPhoneEquipmentIds, vsPhonePadCode, vsPhoneSecretKey]);
 
+  const saveVsPhoneCredentials = useCallback(async () => {
+    setVsPhoneError(null);
+    const response = await fetch("/api/vsphone/credentials", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accessKey: vsPhoneAccessKey, secretKey: vsPhoneSecretKey }),
+    });
+    const result = (await response.json()) as { saved?: boolean; error?: string };
+
+    if (!response.ok) {
+      setVsPhoneError(result.error ?? "Failed to save VSPhone credentials.");
+      return;
+    }
+
+    setVsPhoneCredentialsSaved(Boolean(result.saved));
+  }, [vsPhoneAccessKey, vsPhoneSecretKey]);
+
   useEffect(() => {
-    if (vsPhoneMode !== "automatic" || vsPhoneAction !== "userPadList" || !vsPhoneAccessKey.trim() || !vsPhoneSecretKey.trim()) return;
+    const controller = new AbortController();
+
+    void fetch("/api/vsphone/credentials", { signal: controller.signal })
+      .then((response) => response.json())
+      .then((result: { saved?: boolean }) => setVsPhoneCredentialsSaved(Boolean(result.saved)))
+      .catch(() => undefined);
+
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    if (vsPhoneMode !== "automatic" || vsPhoneAction !== "userPadList" || (!vsPhoneCredentialsSaved && (!vsPhoneAccessKey.trim() || !vsPhoneSecretKey.trim()))) return;
 
     const initialRequest = window.setTimeout(() => void sendVsPhoneRequest(), 0);
     const interval = window.setInterval(() => void sendVsPhoneRequest(), Math.max(10, vsPhoneIntervalSeconds) * 1000);
@@ -537,7 +566,7 @@ export default function EarnappDevicesPage() {
       window.clearTimeout(initialRequest);
       window.clearInterval(interval);
     };
-  }, [sendVsPhoneRequest, vsPhoneAccessKey, vsPhoneAction, vsPhoneIntervalSeconds, vsPhoneMode, vsPhoneSecretKey]);
+  }, [sendVsPhoneRequest, vsPhoneAccessKey, vsPhoneAction, vsPhoneCredentialsSaved, vsPhoneIntervalSeconds, vsPhoneMode, vsPhoneSecretKey]);
 
   useEffect(() => {
     window.queueMicrotask(() => {
@@ -1474,11 +1503,20 @@ export default function EarnappDevicesPage() {
             </div>
 
             <div className="vsPhoneActions">
+              <button
+                type="button"
+                className="secondaryButton"
+                disabled={!vsPhoneAccessKey.trim() || !vsPhoneSecretKey.trim()}
+                onClick={() => void saveVsPhoneCredentials()}
+              >
+                <Save size={17} />
+                {vsPhoneCredentialsSaved ? "Update Saved Keys" : "Save Keys"}
+              </button>
               {vsPhoneMode === "manual" ? (
                 <button
                   type="button"
                   className={`loadConfig ${vsPhoneAction === "replacement" ? "dangerButton" : ""}`}
-                  disabled={vsPhoneLoading || !vsPhoneAccessKey.trim() || !vsPhoneSecretKey.trim() || (vsPhoneAction === "replacement" && !vsPhonePadCode.trim())}
+                  disabled={vsPhoneLoading || (!vsPhoneCredentialsSaved && (!vsPhoneAccessKey.trim() || !vsPhoneSecretKey.trim())) || (vsPhoneAction === "replacement" && !vsPhonePadCode.trim())}
                   onClick={() => {
                     if (vsPhoneAction === "replacement" && !window.confirm(`Replace VSPhone device ${vsPhonePadCode.trim()}? This operation changes the device assignment.`)) return;
                     void sendVsPhoneRequest();
@@ -1489,11 +1527,12 @@ export default function EarnappDevicesPage() {
                 </button>
               ) : (
                 <span className="quietText">
-                  {vsPhoneAccessKey.trim() && vsPhoneSecretKey.trim()
+                  {vsPhoneCredentialsSaved || (vsPhoneAccessKey.trim() && vsPhoneSecretKey.trim())
                     ? `Polling every ${vsPhoneIntervalSeconds} seconds. Change mode to Manual to stop.`
                     : "Enter both API keys to start automatic polling."}
                 </span>
               )}
+              {vsPhoneCredentialsSaved ? <span className="vsPhoneSavedStatus"><Check size={15} /> Keys saved securely</span> : null}
             </div>
 
             {vsPhoneError ? <p className="errorMessage">{vsPhoneError}</p> : null}

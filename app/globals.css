@@ -527,7 +527,18 @@ table {
 .vsPhoneActions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
   min-height: 44px;
+}
+
+.vsPhoneSavedStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--online);
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .vsPhoneResponse {
