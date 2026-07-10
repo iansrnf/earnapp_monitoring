@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { NextResponse } from "next/server";
 
 type VsPhoneAction = "replacement" | "userPadList";
@@ -16,6 +16,61 @@ const PATHS: Record<VsPhoneAction, string> = {
   replacement: "/vsphone/api/padApi/replacement",
   userPadList: "/vsphone/api/padApi/userPadList",
 };
+
+const V4_HOST = "api.vsphone.com";
+const V4_CONTENT_TYPE = "application/json;charset=UTF-8";
+const V4_SERVICE = "armcloud-paas";
+const V4_SIGNED_HEADERS = "content-type;host;x-content-sha256;x-date";
+
+function hmac(key: string | Buffer, value: string) {
+  return createHmac("sha256", key).update(value, "utf8").digest();
+}
+
+function getV4Headers(accessKey: string, secretKey: string, body: string) {
+  const xDate = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+  const shortDate = xDate.slice(0, 8);
+  const credentialScope = `${shortDate}/${V4_SERVICE}/request`;
+  const bodyHash = createHash("sha256").update(body, "utf8").digest("hex");
+  const canonicalRequest = [
+    `host:${V4_HOST}`,
+    `x-date:${xDate}`,
+    `content-type:${V4_CONTENT_TYPE}`,
+    `signedHeaders:${V4_SIGNED_HEADERS}`,
+    `x-content-sha256:${bodyHash}`,
+  ].join("\n");
+  const stringToSign = [
+    "HMAC-SHA256",
+    xDate,
+    credentialScope,
+    createHash("sha256").update(canonicalRequest, "utf8").digest("hex"),
+  ].join("\n");
+  const signingKey = hmac(hmac(hmac(secretKey, shortDate), V4_SERVICE), "request");
+  const signature = createHmac("sha256", signingKey).update(stringToSign, "utf8").digest("hex");
+
+  return {
+    "content-type": V4_CONTENT_TYPE,
+    "x-date": xDate,
+    "x-host": V4_HOST,
+    authorization: `HMAC-SHA256 Credential=${accessKey}/${credentialScope}, SignedHeaders=${V4_SIGNED_HEADERS}, Signature=${signature}`,
+  };
+}
+
+async function readResponse(response: Response) {
+  const responseText = await response.text();
+
+  try {
+    return JSON.parse(responseText) as unknown;
+  } catch {
+    return responseText;
+  }
+}
+
+function needsV4Fallback(response: Response, data: unknown) {
+  if (response.status !== 401 || !data || typeof data !== "object") return false;
+
+  const result = data as { code?: unknown; msg?: unknown };
+  return result.code === 2032 && typeof result.msg === "string" && result.msg.toLowerCase().includes("authorization");
+}
 
 export async function POST(request: Request) {
   const input = (await request.json().catch(() => ({}))) as VsPhoneRequest;
@@ -47,7 +102,8 @@ export async function POST(request: Request) {
   const signature = createHash("sha256").update(`${secretKey}${timestamp}${path}${body}`, "utf8").digest("hex");
 
   try {
-    const response = await fetch(`${VSPHONE_BASE_URL}${path}`, {
+    let authScheme = "V2";
+    let response = await fetch(`${VSPHONE_BASE_URL}${path}`, {
       method: "POST",
       cache: "no-store",
       headers: {
@@ -59,19 +115,27 @@ export async function POST(request: Request) {
       },
       body,
     });
-    const responseText = await response.text();
-    let data: unknown = responseText;
+    let data = await readResponse(response);
 
-    try {
-      data = JSON.parse(responseText);
-    } catch {
-      // Preserve non-JSON upstream responses for troubleshooting.
+    if (needsV4Fallback(response, data)) {
+      authScheme = "V4 fallback";
+      response = await fetch(`${VSPHONE_BASE_URL}${path}`, {
+        method: "POST",
+        cache: "no-store",
+        headers: getV4Headers(accessKey, secretKey, body),
+        body,
+      });
+      data = await readResponse(response);
     }
+
+    const upstreamMessage = data && typeof data === "object" && "msg" in data && typeof data.msg === "string" ? data.msg : "";
 
     return NextResponse.json(
       {
         ok: response.ok,
+        ...(response.ok ? {} : { error: upstreamMessage || `VSPhone request failed with status ${response.status}.` }),
         action,
+        authScheme,
         method: "POST",
         path,
         requestedAt: new Date().toISOString(),
