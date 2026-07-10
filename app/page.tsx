@@ -90,7 +90,7 @@ type WatchlistRow = {
   status: WatchlistStatus;
 };
 
-type Tab = "groups" | "devices" | "ip-duplication" | "forecast" | "watchlist" | "usage";
+type Tab = "groups" | "devices" | "ip-duplication" | "ip-check" | "forecast" | "watchlist" | "usage";
 type SortDirection = "asc" | "desc";
 type SortConfig = {
   tab: Tab;
@@ -425,6 +425,8 @@ export default function EarnappDevicesPage() {
   const [usageCheckedAt, setUsageCheckedAt] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState<Tab>("groups");
+  const [ipCheckInput, setIpCheckInput] = useState("");
+  const [checkedIp, setCheckedIp] = useState<string | null>(null);
   const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
   const [forecastDate, setForecastDate] = useState(getTodayDateInputValue);
   const [selectedDeviceUuids, setSelectedDeviceUuids] = useState<string[]>([]);
@@ -988,6 +990,18 @@ export default function EarnappDevicesPage() {
     );
   }, [filteredDevices]);
 
+  const ipCheckMatches = useMemo(() => {
+    if (!checkedIp) return [];
+
+    return devices.filter((device) => device.ips.some((ip) => ip.trim().toLowerCase() === checkedIp));
+  }, [checkedIp, devices]);
+
+  function checkIpAddress() {
+    const normalizedIp = ipCheckInput.trim().toLowerCase();
+
+    setCheckedIp(normalizedIp || null);
+  }
+
   const watchlistRows = useMemo<WatchlistRow[]>(() => {
     return filteredDevices
       .map((device) => {
@@ -1321,6 +1335,10 @@ export default function EarnappDevicesPage() {
           <button type="button" role="tab" className={`tab ${tab === "ip-duplication" ? "active" : ""}`} onClick={() => setTab("ip-duplication")} aria-selected={tab === "ip-duplication"}>
             <Copy size={16} />
             <span>IP Check Duplication {duplicateIpRows.length}</span>
+          </button>
+          <button type="button" role="tab" className={`tab ${tab === "ip-check" ? "active" : ""}`} onClick={() => setTab("ip-check")} aria-selected={tab === "ip-check"}>
+            <Search size={16} />
+            <span>IP Check</span>
           </button>
           <button type="button" role="tab" className={`tab ${tab === "forecast" ? "active" : ""}`} onClick={() => setTab("forecast")} aria-selected={tab === "forecast"}>
             <CalendarDays size={16} />
@@ -1668,6 +1686,55 @@ export default function EarnappDevicesPage() {
                 </tbody>
               </table>
             </div>
+          </section>
+        ) : tab === "ip-check" ? (
+          <section className="earnAppSection" aria-label="Check an IP address">
+            <div className="sectionHeader">
+              <div>
+                <h2>IP Check</h2>
+                <p>Enter an exact IP address to check whether it is already used by a loaded device.</p>
+              </div>
+            </div>
+            <form
+              className="ipCheckForm"
+              onSubmit={(event) => {
+                event.preventDefault();
+                checkIpAddress();
+              }}
+            >
+              <label>
+                <span>IP Address</span>
+                <input
+                  type="text"
+                  value={ipCheckInput}
+                  onChange={(event) => {
+                    setIpCheckInput(event.target.value);
+                    setCheckedIp(null);
+                  }}
+                  placeholder="Enter an IP address"
+                  aria-label="IP address to check"
+                />
+              </label>
+              <button type="submit" className="loadConfig" disabled={!ipCheckInput.trim()}>
+                <Search size={17} />
+                Check
+              </button>
+            </form>
+            {checkedIp ? (
+              <div className={`ipCheckResult ${ipCheckMatches.length > 0 ? "duplicate" : "safe"}`} role="status">
+                <div>
+                  <span>Result for <span className="mono">{checkedIp}</span></span>
+                  <strong>{ipCheckMatches.length > 0 ? "Duplicate" : "Safe"}</strong>
+                </div>
+                {ipCheckMatches.length > 0 ? (
+                  <ul>
+                    {ipCheckMatches.map((device, index) => (
+                      <li key={device.uuid || `${device.title}-${index}`}>{device.title || "Unnamed device"}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            ) : null}
           </section>
         ) : tab === "ip-duplication" ? (
           <section className="earnAppSection" aria-label="Duplicate device IP addresses">

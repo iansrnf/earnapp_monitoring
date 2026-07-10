@@ -416,6 +416,79 @@ table {
   min-width: 520px;
 }
 
+.ipCheckForm {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+}
+
+.ipCheckForm label {
+  display: grid;
+  flex: 1;
+  gap: 7px;
+}
+
+.ipCheckForm label > span,
+.ipCheckResult > div > span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.ipCheckForm input {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  outline: 0;
+  background: #141619;
+  color: var(--text);
+  border-radius: 8px;
+  padding: 0 12px;
+}
+
+.ipCheckForm input:focus {
+  border-color: var(--accent);
+}
+
+.ipCheckResult {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.ipCheckResult strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 22px;
+}
+
+.ipCheckResult ul {
+  margin: 0;
+  padding-left: 22px;
+}
+
+.ipCheckResult.safe {
+  border-color: rgba(54, 211, 153, 0.46);
+  background: rgba(54, 211, 153, 0.12);
+}
+
+.ipCheckResult.safe strong {
+  color: var(--online);
+}
+
+.ipCheckResult.duplicate {
+  border-color: rgba(255, 107, 107, 0.46);
+  background: rgba(255, 107, 107, 0.12);
+}
+
+.ipCheckResult.duplicate strong {
+  color: var(--offline);
+}
+
 .watchlistTable table {
   min-width: 1120px;
 }
@@ -904,5 +977,11 @@ tr:last-child td {
 
   .toolDialog {
     max-height: calc(100vh - 20px);
+  }
+
+  .ipCheckForm,
+  .ipCheckResult {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
