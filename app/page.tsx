@@ -447,6 +447,7 @@ export default function EarnappDevicesPage() {
   const [vsPhonePadCode, setVsPhonePadCode] = useState("");
   const [vsPhoneEquipmentIds, setVsPhoneEquipmentIds] = useState("");
   const [vsPhoneIntervalSeconds, setVsPhoneIntervalSeconds] = useState(60);
+  const [vsPhoneCountdown, setVsPhoneCountdown] = useState<number | null>(null);
   const [vsPhoneLoading, setVsPhoneLoading] = useState(false);
   const [vsPhoneError, setVsPhoneError] = useState<string | null>(null);
   const [vsPhoneResult, setVsPhoneResult] = useState<unknown>(null);
@@ -468,9 +469,42 @@ export default function EarnappDevicesPage() {
   const cookieFileInputRef = useRef<HTMLInputElement | null>(null);
   const createdAtFileInputRef = useRef<HTMLInputElement | null>(null);
   const autoLoadedCookieRef = useRef("");
+  const vsPhoneAudioContextRef = useRef<AudioContext | null>(null);
 
   const activeCookie = savedCookieExpiresAt ? savedCookie : "";
   const watchlistTargetUsageMs = getWatchlistTargetUsageMs(watchlistTargetUsageMinutes);
+
+  function unlockVsPhoneSuccessSound() {
+    const AudioContextClass = window.AudioContext;
+    const audioContext = vsPhoneAudioContextRef.current ?? new AudioContextClass();
+
+    vsPhoneAudioContextRef.current = audioContext;
+    if (audioContext.state === "suspended") void audioContext.resume();
+  }
+
+  function playVsPhoneSuccessSound() {
+    const audioContext = vsPhoneAudioContextRef.current;
+
+    if (!audioContext) return;
+    if (audioContext.state === "suspended") void audioContext.resume();
+
+    const now = audioContext.currentTime;
+    [0, 0.22].forEach((delay, index) => {
+      const oscillator = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      const startAt = now + delay;
+
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(index === 0 ? 880 : 1174.66, startAt);
+      gain.gain.setValueAtTime(0.0001, startAt);
+      gain.gain.exponentialRampToValueAtTime(0.32, startAt + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.55);
+      oscillator.connect(gain);
+      gain.connect(audioContext.destination);
+      oscillator.start(startAt);
+      oscillator.stop(startAt + 0.56);
+    });
+  }
 
   function toggleSort(key: string) {
     setSortConfig((currentSort) => ({
@@ -575,14 +609,33 @@ export default function EarnappDevicesPage() {
 
     let cancelled = false;
     let timeout: number | undefined;
+    let countdownInterval: number | undefined;
 
     const scheduleRequest = () => {
+      let remaining = Math.max(1, vsPhoneIntervalSeconds);
+      setVsPhoneCountdown(remaining);
+      countdownInterval = window.setInterval(() => {
+        remaining = Math.max(0, remaining - 1);
+        setVsPhoneCountdown(remaining);
+
+        if (remaining === 0 && countdownInterval !== undefined) {
+          window.clearInterval(countdownInterval);
+          countdownInterval = undefined;
+        }
+      }, 1000);
       timeout = window.setTimeout(async () => {
+        if (countdownInterval !== undefined) {
+          window.clearInterval(countdownInterval);
+          countdownInterval = undefined;
+        }
+        setVsPhoneCountdown(null);
         const result = await sendVsPhoneRequest();
 
         if (cancelled) return;
 
         if (vsPhoneAction === "replacement" && isVsPhoneSuccess(result)) {
+          setVsPhoneCountdown(null);
+          playVsPhoneSuccessSound();
           setVsPhoneMode("manual");
           return;
         }
@@ -591,11 +644,13 @@ export default function EarnappDevicesPage() {
       }, Math.max(1, vsPhoneIntervalSeconds) * 1000);
     };
 
-    scheduleRequest();
+    const begin = window.setTimeout(scheduleRequest, 0);
 
     return () => {
       cancelled = true;
+      window.clearTimeout(begin);
       if (timeout !== undefined) window.clearTimeout(timeout);
+      if (countdownInterval !== undefined) window.clearInterval(countdownInterval);
     };
   }, [sendVsPhoneRequest, vsPhoneAccessKey, vsPhoneAction, vsPhoneCredentialsSaved, vsPhoneIntervalSeconds, vsPhoneMode, vsPhoneSecretKey]);
 
@@ -1495,6 +1550,7 @@ export default function EarnappDevicesPage() {
                   const nextAction = event.target.value as VsPhoneAction;
                   setVsPhoneAction(nextAction);
                   setVsPhoneMode("manual");
+                  setVsPhoneCountdown(null);
                 }}>
                   <option value="userPadList">Cloud Phone List — POST /userPadList</option>
                   <option value="replacement">Device Replacement — POST /replacement</option>
@@ -1518,9 +1574,12 @@ export default function EarnappDevicesPage() {
                       );
 
                       if (!confirmed) return;
+
+                      unlockVsPhoneSuccessSound();
                     }
 
                     setVsPhoneMode(nextMode);
+                    if (nextMode === "manual") setVsPhoneCountdown(null);
                   }}
                 >
                   <option value="manual">Manual</option>
@@ -1577,13 +1636,18 @@ export default function EarnappDevicesPage() {
                   {vsPhoneLoading ? "Requesting..." : "Send Request"}
                 </button>
               ) : (
-                <span className="quietText">
-                  {vsPhoneCredentialsSaved || (vsPhoneAccessKey.trim() && vsPhoneSecretKey.trim())
-                    ? vsPhoneAction === "replacement"
-                      ? `Replacement starts after ${vsPhoneIntervalSeconds} second(s), repeats after each response, and stops when data.msg is success.`
-                      : `Polling every ${vsPhoneIntervalSeconds} seconds. Change mode to Manual to stop.`
-                    : "Enter both API keys to start automatic polling."}
-                </span>
+                <div className="vsPhoneAutomationStatus" role="status">
+                  <span className="vsPhoneCountdown">
+                    {vsPhoneLoading ? "Requesting now…" : vsPhoneCountdown !== null ? `Next request in ${vsPhoneCountdown}s` : "Preparing…"}
+                  </span>
+                  <span className="quietText">
+                    {vsPhoneCredentialsSaved || (vsPhoneAccessKey.trim() && vsPhoneSecretKey.trim())
+                      ? vsPhoneAction === "replacement"
+                        ? "Retries continue until data.msg is success."
+                        : "Change mode to Manual to stop."
+                      : "Enter both API keys to start automatic polling."}
+                  </span>
+                </div>
               )}
               {vsPhoneCredentialsSaved ? <span className="vsPhoneSavedStatus"><Check size={15} /> Keys saved securely</span> : null}
             </div>
