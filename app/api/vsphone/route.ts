@@ -26,7 +26,7 @@ function hmac(key: string | Buffer, value: string) {
   return createHmac("sha256", key).update(value, "utf8").digest();
 }
 
-function getV4Headers(accessKey: string, secretKey: string, body: string, contentType = V4_CONTENT_TYPE, scopedCredential = false) {
+function getV4Headers(accessKey: string, secretKey: string, body: string) {
   const xDate = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
   const shortDate = xDate.slice(0, 8);
   const credentialScope = `${shortDate}/${V4_SERVICE}/request`;
@@ -34,7 +34,7 @@ function getV4Headers(accessKey: string, secretKey: string, body: string, conten
   const canonicalRequest = [
     `host:${V4_HOST}`,
     `x-date:${xDate}`,
-    `content-type:${contentType}`,
+    `content-type:${V4_CONTENT_TYPE}`,
     `signedHeaders:${V4_SIGNED_HEADERS}`,
     `x-content-sha256:${bodyHash}`,
   ].join("\n");
@@ -48,11 +48,10 @@ function getV4Headers(accessKey: string, secretKey: string, body: string, conten
   const signature = createHmac("sha256", signingKey).update(stringToSign, "utf8").digest("hex");
 
   return {
-    "content-type": contentType,
+    "content-type": V4_CONTENT_TYPE,
     "x-date": xDate,
     "x-host": V4_HOST,
-    "x-content-sha256": bodyHash,
-    authorization: `HMAC-SHA256 Credential=${accessKey}${scopedCredential ? `/${credentialScope}` : ""}, SignedHeaders=${V4_SIGNED_HEADERS}, Signature=${signature}`,
+    authorization: `HMAC-SHA256 Credential=${accessKey}, SignedHeaders=${V4_SIGNED_HEADERS}, Signature=${signature}`,
   };
 }
 
@@ -126,26 +125,14 @@ export async function POST(request: Request) {
     let data = await readResponse(response);
 
     if (needsV4Fallback(response, data)) {
-      const v4Variants = [
-        { contentType: V4_CONTENT_TYPE, scoped: false, label: "V4 bare credential" },
-        { contentType: "application/json", scoped: false, label: "V4 bare credential/json" },
-        { contentType: V4_CONTENT_TYPE, scoped: true, label: "V4 scoped credential" },
-        { contentType: "application/json", scoped: true, label: "V4 scoped credential/json" },
-      ];
-
-      for (const variant of v4Variants) {
-        authScheme = variant.label;
-        response = await fetch(`${VSPHONE_BASE_URL}${path}`, {
-          method: "POST",
-          cache: "no-store",
-          headers: getV4Headers(accessKey, secretKey, body, variant.contentType, variant.scoped),
-          body,
-        });
-        data = await readResponse(response);
-
-        const result = data && typeof data === "object" ? data as { code?: unknown } : null;
-        if (response.ok || result?.code !== 2019) break;
-      }
+      authScheme = "V4 Java-compatible";
+      response = await fetch(`${VSPHONE_BASE_URL}${path}`, {
+        method: "POST",
+        cache: "no-store",
+        headers: getV4Headers(accessKey, secretKey, body),
+        body,
+      });
+      data = await readResponse(response);
     }
 
     const upstreamMessage = data && typeof data === "object" && "msg" in data && typeof data.msg === "string" ? data.msg : "";
