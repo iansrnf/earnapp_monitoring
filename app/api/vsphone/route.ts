@@ -1,7 +1,7 @@
 import { createHash, createHmac } from "node:crypto";
 import { NextResponse } from "next/server";
 
-type VsPhoneAction = "replacement" | "userPadList" | "checkIP";
+type VsPhoneAction = "replacement" | "userPadList" | "checkIP" | "infos";
 
 type VsPhoneRequest = {
   action?: unknown;
@@ -10,6 +10,7 @@ type VsPhoneRequest = {
   padCode?: unknown;
   equipmentIds?: unknown;
   proxy?: unknown;
+  infos?: unknown;
 };
 
 const VSPHONE_BASE_URL = "https://api.vsphone.com";
@@ -17,6 +18,7 @@ const PATHS: Record<VsPhoneAction, string> = {
   replacement: "/vsphone/api/padApi/replacement",
   userPadList: "/vsphone/api/padApi/userPadList",
   checkIP: "/vsphone/api/padApi/checkIP",
+  infos: "/vsphone/api/padApi/infos",
 };
 
 const V4_HOST = "api.vsphone.com";
@@ -81,7 +83,7 @@ function needsV4Fallback(response: Response, data: unknown) {
 
 export async function POST(request: Request) {
   const input = (await request.json().catch(() => ({}))) as VsPhoneRequest;
-  const action = input.action === "replacement" || input.action === "userPadList" || input.action === "checkIP" ? input.action : null;
+  const action = input.action === "replacement" || input.action === "userPadList" || input.action === "checkIP" || input.action === "infos" ? input.action : null;
   const enteredAccessKey = typeof input.accessKey === "string" ? input.accessKey.trim() : "";
   const enteredSecretKey = typeof input.secretKey === "string" ? input.secretKey.trim() : "";
   const accessKey = enteredAccessKey || getCookie(request, "vsphone-ak") || process.env.VSPHONE_ACCESS_KEY?.trim() || "";
@@ -105,9 +107,9 @@ export async function POST(request: Request) {
   }
 
   const path = PATHS[action];
-  const payload: Record<string, string | number | number[]> = {};
+  const payload: Record<string, string | number | number[] | string[]> = {};
 
-  if (action !== "checkIP" && padCode) payload.padCode = padCode;
+  if ((action === "replacement" || action === "userPadList") && padCode) payload.padCode = padCode;
   if (action === "userPadList" && equipmentIds.length > 0) payload.equipmentIds = equipmentIds;
 
   if (action === "checkIP") {
@@ -129,6 +131,24 @@ export async function POST(request: Request) {
     for (const key of ["country", "ip", "loc", "city", "region", "timezone"] as const) {
       const value = typeof proxy[key] === "string" ? proxy[key].trim() : "";
       if (value) payload[key] = value;
+    }
+  }
+
+  if (action === "infos") {
+    const infos = input.infos && typeof input.infos === "object" ? input.infos as Record<string, unknown> : {};
+    const page = Number(infos.page);
+    const rows = Number(infos.rows);
+
+    if (!Number.isInteger(page) || page < 1) return NextResponse.json({ error: "Page must be a positive integer." }, { status: 400 });
+    if (!Number.isInteger(rows) || rows < 1) return NextResponse.json({ error: "Rows must be a positive integer." }, { status: 400 });
+
+    payload.page = page;
+    payload.rows = rows;
+
+    if (infos.padType === "virtual" || infos.padType === "real") payload.padType = infos.padType;
+    if (Array.isArray(infos.padCodes)) {
+      const padCodes = infos.padCodes.filter((value): value is string => typeof value === "string" && Boolean(value.trim())).map((value) => value.trim());
+      if (padCodes.length > 0) payload.padCodes = padCodes;
     }
   }
   const body = JSON.stringify(payload);

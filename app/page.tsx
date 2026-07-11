@@ -91,7 +91,7 @@ type WatchlistRow = {
 };
 
 type Tab = "groups" | "devices" | "ip-duplication" | "ip-check" | "vsphone" | "forecast" | "watchlist" | "usage";
-type VsPhoneAction = "userPadList" | "replacement" | "checkIP";
+type VsPhoneAction = "userPadList" | "replacement" | "checkIP" | "infos";
 type VsPhoneApiResult = {
   error?: string;
   data?: { msg?: unknown } | unknown;
@@ -447,6 +447,7 @@ export default function EarnappDevicesPage() {
   const [vsPhonePadCode, setVsPhonePadCode] = useState("");
   const [vsPhoneEquipmentIds, setVsPhoneEquipmentIds] = useState("");
   const [vsPhoneProxy, setVsPhoneProxy] = useState({ host: "", port: "", account: "", password: "", type: "Socks5", country: "", ip: "", loc: "", city: "", region: "", timezone: "" });
+  const [vsPhoneInfos, setVsPhoneInfos] = useState({ page: "1", rows: "10", padType: "", padCodes: "" });
   const [vsPhoneIntervalSeconds, setVsPhoneIntervalSeconds] = useState(60);
   const [vsPhoneCountdown, setVsPhoneCountdown] = useState<number | null>(null);
   const [vsPhoneLoading, setVsPhoneLoading] = useState(false);
@@ -559,6 +560,12 @@ export default function EarnappDevicesPage() {
           padCode: vsPhonePadCode,
           equipmentIds,
           proxy: { ...vsPhoneProxy, port: Number(vsPhoneProxy.port) },
+          infos: {
+            page: Number(vsPhoneInfos.page),
+            rows: Number(vsPhoneInfos.rows),
+            padType: vsPhoneInfos.padType,
+            padCodes: vsPhoneInfos.padCodes.split(",").map((value) => value.trim()).filter(Boolean),
+          },
         }),
       });
       const result = (await response.json()) as VsPhoneApiResult;
@@ -576,7 +583,7 @@ export default function EarnappDevicesPage() {
     } finally {
       setVsPhoneLoading(false);
     }
-  }, [vsPhoneAccessKey, vsPhoneAction, vsPhoneEquipmentIds, vsPhonePadCode, vsPhoneProxy, vsPhoneSecretKey]);
+  }, [vsPhoneAccessKey, vsPhoneAction, vsPhoneEquipmentIds, vsPhoneInfos, vsPhonePadCode, vsPhoneProxy, vsPhoneSecretKey]);
 
   const saveVsPhoneCredentials = useCallback(async () => {
     setVsPhoneError(null);
@@ -1557,6 +1564,7 @@ export default function EarnappDevicesPage() {
                   <option value="userPadList">Cloud Phone List — POST /userPadList</option>
                   <option value="replacement">Device Replacement — POST /replacement</option>
                   <option value="checkIP">Smart IP Proxy Detection — POST /checkIP</option>
+                  <option value="infos">Instance List — POST /infos</option>
                 </select>
               </label>
               <label>
@@ -1597,7 +1605,7 @@ export default function EarnappDevicesPage() {
                 <span>Secret Key (SK)</span>
                 <input type="password" value={vsPhoneSecretKey} onChange={(event) => setVsPhoneSecretKey(event.target.value)} placeholder="Secret Access Key" autoComplete="new-password" />
               </label>
-              {vsPhoneAction !== "checkIP" ? (
+              {vsPhoneAction === "userPadList" || vsPhoneAction === "replacement" ? (
                 <label>
                   <span>Pad Code {vsPhoneAction === "replacement" ? "(required)" : "(optional)"}</span>
                   <input type="text" value={vsPhonePadCode} onChange={(event) => setVsPhonePadCode(event.target.value)} placeholder="AC32010030001" />
@@ -1661,6 +1669,30 @@ export default function EarnappDevicesPage() {
                   </label>
                 </>
               ) : null}
+              {vsPhoneAction === "infos" ? (
+                <>
+                  <label>
+                    <span>Page (required)</span>
+                    <input type="number" min={1} value={vsPhoneInfos.page} onChange={(event) => setVsPhoneInfos((value) => ({ ...value, page: event.target.value }))} />
+                  </label>
+                  <label>
+                    <span>Rows Per Page (required)</span>
+                    <input type="number" min={1} value={vsPhoneInfos.rows} onChange={(event) => setVsPhoneInfos((value) => ({ ...value, rows: event.target.value }))} />
+                  </label>
+                  <label>
+                    <span>Instance Type (optional)</span>
+                    <select value={vsPhoneInfos.padType} onChange={(event) => setVsPhoneInfos((value) => ({ ...value, padType: event.target.value }))}>
+                      <option value="">All types</option>
+                      <option value="virtual">Virtual</option>
+                      <option value="real">Real</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Pad Codes (optional)</span>
+                    <input type="text" value={vsPhoneInfos.padCodes} onChange={(event) => setVsPhoneInfos((value) => ({ ...value, padCodes: event.target.value }))} placeholder="AC22010020062, AC22010020063" />
+                  </label>
+                </>
+              ) : null}
               {vsPhoneMode === "automatic" ? (
                 <label>
                   <span>Delay Between Requests (seconds)</span>
@@ -1683,7 +1715,7 @@ export default function EarnappDevicesPage() {
                 <button
                   type="button"
                   className={`loadConfig ${vsPhoneAction === "replacement" ? "dangerButton" : ""}`}
-                  disabled={vsPhoneLoading || (!vsPhoneCredentialsSaved && (!vsPhoneAccessKey.trim() || !vsPhoneSecretKey.trim())) || (vsPhoneAction === "replacement" && !vsPhonePadCode.trim()) || (vsPhoneAction === "checkIP" && (!vsPhoneProxy.host.trim() || !vsPhoneProxy.port || !vsPhoneProxy.account.trim() || !vsPhoneProxy.password.trim()))}
+                  disabled={vsPhoneLoading || (!vsPhoneCredentialsSaved && (!vsPhoneAccessKey.trim() || !vsPhoneSecretKey.trim())) || (vsPhoneAction === "replacement" && !vsPhonePadCode.trim()) || (vsPhoneAction === "checkIP" && (!vsPhoneProxy.host.trim() || !vsPhoneProxy.port || !vsPhoneProxy.account.trim() || !vsPhoneProxy.password.trim())) || (vsPhoneAction === "infos" && (!vsPhoneInfos.page || !vsPhoneInfos.rows))}
                   onClick={() => {
                     if (vsPhoneAction === "replacement" && !window.confirm(`Replace VSPhone device ${vsPhonePadCode.trim()}? This operation changes the device assignment.`)) return;
                     void sendVsPhoneRequest();
