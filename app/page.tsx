@@ -114,7 +114,8 @@ const EARNAPP_HOURLY_RATE_USD = 0.0069;
 const EARNAPP_DEVICE_CREATED_AT_STORAGE_KEY = "earnapp-device-created-at";
 const WATCHLIST_TARGET_USAGE_MINUTES_STORAGE_KEY = "earnapp-watchlist-target-usage-minutes";
 const WATCHLIST_TARGET_HOURS_STORAGE_KEY = "earnapp-watchlist-target-hours";
-const WATCHLIST_WINDOW_MS = 6 * 60 * 60 * 1000;
+const WATCHLIST_WINDOW_HOURS_STORAGE_KEY = "earnapp-watchlist-window-hours";
+const WATCHLIST_DEFAULT_WINDOW_HOURS = 6;
 const WATCHLIST_DEFAULT_TARGET_USAGE_MINUTES = 270;
 const WATCHLIST_MIN_TARGET_USAGE_MINUTES = 1;
 const WATCHLIST_MAX_TARGET_USAGE_MINUTES = 24 * 60;
@@ -426,6 +427,18 @@ function getSavedWatchlistTargetUsageMinutes() {
   }
 }
 
+function getSavedWatchlistWindowHours() {
+  try {
+    if (typeof window === "undefined") return WATCHLIST_DEFAULT_WINDOW_HOURS;
+
+    const storedValue = window.localStorage.getItem(WATCHLIST_WINDOW_HOURS_STORAGE_KEY) || getCookieValue(WATCHLIST_WINDOW_HOURS_STORAGE_KEY);
+    const parsedValue = Number(storedValue);
+    return Number.isInteger(parsedValue) && parsedValue >= 1 && parsedValue <= 168 ? parsedValue : WATCHLIST_DEFAULT_WINDOW_HOURS;
+  } catch {
+    return WATCHLIST_DEFAULT_WINDOW_HOURS;
+  }
+}
+
 export default function EarnappDevicesPage() {
   const [cookie, setCookie] = useState("");
   const [savedCookie, setSavedCookie] = useState("");
@@ -463,6 +476,8 @@ export default function EarnappDevicesPage() {
   const [watchlistTargetUsageMinutes, setWatchlistTargetUsageMinutes] = useState(WATCHLIST_DEFAULT_TARGET_USAGE_MINUTES);
   const [watchlistTargetHoursDraft, setWatchlistTargetHoursDraft] = useState(String(getWatchlistTargetParts(WATCHLIST_DEFAULT_TARGET_USAGE_MINUTES).hours));
   const [watchlistTargetMinutesDraft, setWatchlistTargetMinutesDraft] = useState(String(getWatchlistTargetParts(WATCHLIST_DEFAULT_TARGET_USAGE_MINUTES).minutes));
+  const [watchlistWindowHours, setWatchlistWindowHours] = useState(WATCHLIST_DEFAULT_WINDOW_HOURS);
+  const [watchlistWindowHoursDraft, setWatchlistWindowHoursDraft] = useState(String(WATCHLIST_DEFAULT_WINDOW_HOURS));
   const [usageModalDevice, setUsageModalDevice] = useState<EarnAppDevice | null>(null);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   const [loading, setLoading] = useState(false);
@@ -475,6 +490,7 @@ export default function EarnappDevicesPage() {
 
   const activeCookie = savedCookieExpiresAt ? savedCookie : "";
   const watchlistTargetUsageMs = getWatchlistTargetUsageMs(watchlistTargetUsageMinutes);
+  const watchlistWindowMs = watchlistWindowHours * 60 * 60 * 1000;
 
   function unlockVsPhoneSuccessSound() {
     const AudioContextClass = window.AudioContext;
@@ -672,6 +688,9 @@ export default function EarnappDevicesPage() {
       setWatchlistTargetUsageMinutes(savedTargetMinutes);
       setWatchlistTargetHoursDraft(String(savedTargetParts.hours));
       setWatchlistTargetMinutesDraft(String(savedTargetParts.minutes));
+      const savedWindowHours = getSavedWatchlistWindowHours();
+      setWatchlistWindowHours(savedWindowHours);
+      setWatchlistWindowHoursDraft(String(savedWindowHours));
     });
   }, []);
 
@@ -762,6 +781,15 @@ export default function EarnappDevicesPage() {
     window.localStorage.setItem(WATCHLIST_TARGET_USAGE_MINUTES_STORAGE_KEY, String(nextTargetMinutes));
     window.localStorage.removeItem(WATCHLIST_TARGET_HOURS_STORAGE_KEY);
     setCookieValue(`${WATCHLIST_TARGET_USAGE_MINUTES_STORAGE_KEY}=${encodeURIComponent(String(nextTargetMinutes))}; Max-Age=31536000; Path=/; SameSite=Lax`);
+  }
+
+  function saveWatchlistWindowHours(value: string) {
+    const parsedValue = Number(value);
+    if (!Number.isInteger(parsedValue) || parsedValue < 1 || parsedValue > 168) return;
+
+    setWatchlistWindowHours(parsedValue);
+    window.localStorage.setItem(WATCHLIST_WINDOW_HOURS_STORAGE_KEY, String(parsedValue));
+    setCookieValue(`${WATCHLIST_WINDOW_HOURS_STORAGE_KEY}=${parsedValue}; Max-Age=31536000; Path=/; SameSite=Lax`);
   }
 
   function saveWatchlistTargetUsageDraft(nextHours: string, nextMinutes: string) {
@@ -1059,9 +1087,9 @@ export default function EarnappDevicesPage() {
         const points = Array.from(pointsByDate.values()).slice(-14);
         const days = points.length;
         const totalUsage = points.reduce((total, point) => total + point.usage, 0);
-        const totalEarned = points.reduce((total, point) => total + (point.earned || getUsageEarned(point.usage)), 0);
+        const totalEarned = getUsageEarned(totalUsage);
         const avgUsage = days ? totalUsage / days : 0;
-        const avgEarned = days ? totalEarned / days : device.earned || getUsageEarned(device.uptime);
+        const avgEarned = days ? totalEarned / days : getUsageEarned(device.uptime);
 
         return {
           device,
@@ -1081,7 +1109,7 @@ export default function EarnappDevicesPage() {
         const usage = getDeviceUsage(row.device);
         const actualPoint = usage?.points.find((point) => getDeviceDateKey(point.date) === forecastDate) ?? null;
         const displayUsage = actualPoint ? actualPoint.usage : row.avgUsage;
-        const displayEarned = actualPoint ? actualPoint.earned || getUsageEarned(actualPoint.usage) : row.avgEarned;
+        const displayEarned = getUsageEarned(displayUsage);
 
         return {
           ...row,
@@ -1215,7 +1243,7 @@ export default function EarnappDevicesPage() {
           };
         }
 
-        const deadlineAt = new Date(createdAt.getTime() + WATCHLIST_WINDOW_MS);
+        const deadlineAt = new Date(createdAt.getTime() + watchlistWindowMs);
         const usage = getDeviceUsage(device)?.points.reduce((total, point) => {
           const pointKey = getDeviceDateKey(point.date);
           const createdAtKey = getDeviceDateKey(createdAt.toISOString());
@@ -1248,7 +1276,7 @@ export default function EarnappDevicesPage() {
 
         return priority[first.status] - priority[second.status] || first.device.title.localeCompare(second.device.title);
       });
-  }, [currentTime, deviceCreatedAtByUuid, filteredDevices, getDeviceUsage, watchlistTargetUsageMs]);
+  }, [currentTime, deviceCreatedAtByUuid, filteredDevices, getDeviceUsage, watchlistTargetUsageMs, watchlistWindowMs]);
 
   const sortedGroupedDevices = useMemo(
     () =>
@@ -1341,6 +1369,7 @@ export default function EarnappDevicesPage() {
   const totalEarned = devices.reduce((total, device) => total + device.earned, 0);
   const forecastTotal = forecastRows.reduce((total, row) => total + row.thirtyDayEarned, 0);
   const dailyForecastTotal = dailyForecastRows.reduce((total, row) => total + row.displayEarned, 0);
+  const dailyForecastTotalUsage = dailyForecastRows.reduce((total, row) => total + row.displayUsage, 0);
   const noUsageForecastRows = dailyForecastRows.filter((row) => row.hasNoUsage && row.device.uuid);
   const selectedForecastDevices = noUsageForecastRows.map((row) => row.device).filter((device) => selectedForecastUuids.includes(device.uuid));
   const selectedVisibleForecastCount = noUsageForecastRows.filter((row) => selectedForecastUuids.includes(row.device.uuid)).length;
@@ -1755,7 +1784,7 @@ export default function EarnappDevicesPage() {
             <div className="sectionHeader">
               <div>
                 <h2>Daily Forecast</h2>
-                <p>Calendar-selected device usage. Historical dates show actual usage when Earnapp has it; future dates show the per-day estimate.</p>
+                <p>Calendar-selected device usage. Historical dates show actual usage when Earnapp has it; future dates show the per-day estimate. Earnings use $0.0069 per usage hour.</p>
               </div>
               <label className="dateField">
                 <CalendarDays size={16} />
@@ -1773,7 +1802,11 @@ export default function EarnappDevicesPage() {
                 <strong>{dailyForecastRows.length}</strong>
               </div>
               <div>
-                <span>Day Total</span>
+                <span>Total Usage</span>
+                <strong>{formatUsageDuration(dailyForecastTotalUsage)}</strong>
+              </div>
+              <div>
+                <span>Total Earned</span>
                 <strong>{formatUsd(dailyForecastTotal)}</strong>
               </div>
               <div>
@@ -1907,7 +1940,7 @@ export default function EarnappDevicesPage() {
             <div className="sectionHeader">
               <div>
                 <h2>Watchlist</h2>
-                <p>Checks whether each install reached at least {formatUsageDuration(watchlistTargetUsageMs)} of usage during its first 6 hours after Created At.</p>
+                <p>Checks whether each install reached at least {formatUsageDuration(watchlistTargetUsageMs)} of usage during its first {watchlistWindowHours} hours after Created At.</p>
               </div>
               <div className="watchlistTargetField" aria-label="Watchlist target usage">
                 <label>
@@ -1942,6 +1975,22 @@ export default function EarnappDevicesPage() {
                     aria-label="Watchlist target usage minutes"
                   />
                 </label>
+                <label>
+                  <span>Test Hours</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="168"
+                    step="1"
+                    value={watchlistWindowHoursDraft}
+                    onChange={(event) => {
+                      setWatchlistWindowHoursDraft(event.target.value);
+                      saveWatchlistWindowHours(event.target.value);
+                    }}
+                    onBlur={() => setWatchlistWindowHoursDraft(String(watchlistWindowHours))}
+                    aria-label="Watchlist test duration hours"
+                  />
+                </label>
               </div>
             </div>
             <div className="earnAppMetrics">
@@ -1961,6 +2010,10 @@ export default function EarnappDevicesPage() {
                 <span>Target</span>
                 <strong>{formatUsageDuration(watchlistTargetUsageMs)}</strong>
               </div>
+              <div>
+                <span>Test Duration</span>
+                <strong>{watchlistWindowHours}h</strong>
+              </div>
             </div>
             <div className="tableWrap earnAppTable watchlistTable">
               <table>
@@ -1970,9 +2023,9 @@ export default function EarnappDevicesPage() {
                     <th>{renderSortHeader("Device", "device")}</th>
                     <th>{renderSortHeader("Status", "status")}</th>
                     <th>{renderSortHeader("Created At", "created")}</th>
-                    <th>{renderSortHeader("6h Deadline", "deadline")}</th>
+                    <th>{renderSortHeader(`${watchlistWindowHours}h Deadline`, "deadline")}</th>
                     <th>{renderSortHeader("Elapsed", "elapsed")}</th>
-                    <th>{renderSortHeader("First 6h Usage", "usage")}</th>
+                    <th>{renderSortHeader(`First ${watchlistWindowHours}h Usage`, "usage")}</th>
                     <th>{renderSortHeader("Target", "target")}</th>
                     <th>Action</th>
                   </tr>
@@ -2010,7 +2063,7 @@ export default function EarnappDevicesPage() {
                         </td>
                         <td className="mono">{formatCreatedAt(row.createdAtValue)}</td>
                         <td className="mono">{row.deadlineAt ? formatDate(row.deadlineAt.toISOString()) : "-"}</td>
-                        <td className="mono">{row.createdAt ? formatUsageDuration(Math.min(row.elapsed, WATCHLIST_WINDOW_MS)) : "-"}</td>
+                        <td className="mono">{row.createdAt ? formatUsageDuration(Math.min(row.elapsed, watchlistWindowMs)) : "-"}</td>
                         <td className="mono">{formatUsageDuration(row.usage)}</td>
                         <td className="mono">{formatUsageDuration(watchlistTargetUsageMs)}</td>
                         <td>
