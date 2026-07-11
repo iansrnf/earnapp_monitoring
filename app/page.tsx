@@ -452,7 +452,7 @@ export default function EarnappDevicesPage() {
   const [tab, setTab] = useState<Tab>("groups");
   const [ipCheckInput, setIpCheckInput] = useState("");
   const [checkedIp, setCheckedIp] = useState<string | null>(null);
-  const [ipInformation, setIpInformation] = useState<{ isp: string; city: string; region: string; country: string; isDataCenter: boolean; dataCenterService: string; classificationSource: string } | null>(null);
+  const [ipInformation, setIpInformation] = useState<{ isp: string; city: string; region: string; country: string; isDataCenter: boolean; dataCenterService: string; classificationSource: string; sources: Array<{ provider: string; verdict: boolean | null }> } | null>(null);
   const [ipInformationLoading, setIpInformationLoading] = useState(false);
   const [ipInformationError, setIpInformationError] = useState<string | null>(null);
   const [vsPhoneAction, setVsPhoneAction] = useState<VsPhoneAction>("userPadList");
@@ -1224,7 +1224,7 @@ export default function EarnappDevicesPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ip: normalizedIp }),
       });
-      const result = await response.json() as { error?: string; isp?: string; city?: string; region?: string; country?: string; isDataCenter?: boolean; dataCenterService?: string; classificationSource?: string };
+      const result = await response.json() as { error?: string; isp?: string; city?: string; region?: string; country?: string; isDataCenter?: boolean; dataCenterService?: string; classificationSource?: string; sources?: Array<{ provider: string; verdict: boolean | null }> };
 
       if (!response.ok) {
         setIpInformationError(result.error || "Failed to look up IP information.");
@@ -1240,6 +1240,7 @@ export default function EarnappDevicesPage() {
         isDataCenter: Boolean(result.isDataCenter),
         dataCenterService: result.dataCenterService || "Unknown",
         classificationSource: result.classificationSource || "ISP heuristic",
+        sources: result.sources || [],
       });
     } catch (lookupError) {
       setIpInformationError(lookupError instanceof Error ? lookupError.message : "Failed to look up IP information.");
@@ -2239,6 +2240,13 @@ export default function EarnappDevicesPage() {
                   </div>
                   <div><dt>Service</dt><dd>{ipInformation.dataCenterService}</dd></div>
                 </dl>
+                <div className="ipProviderResults">
+                  {ipInformation.sources.map((source) => (
+                    <span key={source.provider} className={source.verdict === true ? "yes" : source.verdict === false ? "no" : "unknown"}>
+                      {source.provider}: {source.verdict === true ? "Data center" : source.verdict === false ? "Not data center" : "Not configured/unavailable"}
+                    </span>
+                  ))}
+                </div>
               </div>
             ) : null}
           </section>

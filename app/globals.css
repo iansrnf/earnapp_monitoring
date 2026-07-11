@@ -535,6 +535,25 @@ table {
   font-weight: 400;
 }
 
+.ipProviderResults {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 14px;
+}
+
+.ipProviderResults span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 9px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.ipProviderResults .yes { color: var(--offline); border-color: rgba(255, 107, 107, 0.46); }
+.ipProviderResults .no { color: var(--online); border-color: rgba(54, 211, 153, 0.46); }
+
 .vsPhoneGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
