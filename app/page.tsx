@@ -91,7 +91,7 @@ type WatchlistRow = {
 };
 
 type Tab = "groups" | "devices" | "ip-duplication" | "ip-check" | "vsphone" | "forecast" | "watchlist" | "usage";
-type VsPhoneAction = "userPadList" | "replacement";
+type VsPhoneAction = "userPadList" | "replacement" | "checkIP";
 type VsPhoneApiResult = {
   error?: string;
   data?: { msg?: unknown } | unknown;
@@ -446,6 +446,7 @@ export default function EarnappDevicesPage() {
   const [vsPhoneCredentialsSaved, setVsPhoneCredentialsSaved] = useState(false);
   const [vsPhonePadCode, setVsPhonePadCode] = useState("");
   const [vsPhoneEquipmentIds, setVsPhoneEquipmentIds] = useState("");
+  const [vsPhoneProxy, setVsPhoneProxy] = useState({ host: "", port: "", account: "", password: "", type: "Socks5", country: "", ip: "", loc: "", city: "", region: "", timezone: "" });
   const [vsPhoneIntervalSeconds, setVsPhoneIntervalSeconds] = useState(60);
   const [vsPhoneCountdown, setVsPhoneCountdown] = useState<number | null>(null);
   const [vsPhoneLoading, setVsPhoneLoading] = useState(false);
@@ -557,6 +558,7 @@ export default function EarnappDevicesPage() {
           secretKey: vsPhoneSecretKey,
           padCode: vsPhonePadCode,
           equipmentIds,
+          proxy: { ...vsPhoneProxy, port: Number(vsPhoneProxy.port) },
         }),
       });
       const result = (await response.json()) as VsPhoneApiResult;
@@ -574,7 +576,7 @@ export default function EarnappDevicesPage() {
     } finally {
       setVsPhoneLoading(false);
     }
-  }, [vsPhoneAccessKey, vsPhoneAction, vsPhoneEquipmentIds, vsPhonePadCode, vsPhoneSecretKey]);
+  }, [vsPhoneAccessKey, vsPhoneAction, vsPhoneEquipmentIds, vsPhonePadCode, vsPhoneProxy, vsPhoneSecretKey]);
 
   const saveVsPhoneCredentials = useCallback(async () => {
     setVsPhoneError(null);
@@ -1554,6 +1556,7 @@ export default function EarnappDevicesPage() {
                 }}>
                   <option value="userPadList">Cloud Phone List — POST /userPadList</option>
                   <option value="replacement">Device Replacement — POST /replacement</option>
+                  <option value="checkIP">Smart IP Proxy Detection — POST /checkIP</option>
                 </select>
               </label>
               <label>
@@ -1594,15 +1597,69 @@ export default function EarnappDevicesPage() {
                 <span>Secret Key (SK)</span>
                 <input type="password" value={vsPhoneSecretKey} onChange={(event) => setVsPhoneSecretKey(event.target.value)} placeholder="Secret Access Key" autoComplete="new-password" />
               </label>
-              <label>
-                <span>Pad Code {vsPhoneAction === "replacement" ? "(required)" : "(optional)"}</span>
-                <input type="text" value={vsPhonePadCode} onChange={(event) => setVsPhonePadCode(event.target.value)} placeholder="AC32010030001" />
-              </label>
+              {vsPhoneAction !== "checkIP" ? (
+                <label>
+                  <span>Pad Code {vsPhoneAction === "replacement" ? "(required)" : "(optional)"}</span>
+                  <input type="text" value={vsPhonePadCode} onChange={(event) => setVsPhonePadCode(event.target.value)} placeholder="AC32010030001" />
+                </label>
+              ) : null}
               {vsPhoneAction === "userPadList" ? (
                 <label>
                   <span>Equipment IDs (optional)</span>
                   <input type="text" value={vsPhoneEquipmentIds} onChange={(event) => setVsPhoneEquipmentIds(event.target.value)} placeholder="106626, 106627" />
                 </label>
+              ) : null}
+              {vsPhoneAction === "checkIP" ? (
+                <>
+                  <label>
+                    <span>Proxy Host (required)</span>
+                    <input type="text" value={vsPhoneProxy.host} onChange={(event) => setVsPhoneProxy((value) => ({ ...value, host: event.target.value }))} placeholder="62.112.132.92" />
+                  </label>
+                  <label>
+                    <span>Proxy Port (required)</span>
+                    <input type="number" min={1} max={65535} value={vsPhoneProxy.port} onChange={(event) => setVsPhoneProxy((value) => ({ ...value, port: event.target.value }))} placeholder="45001" />
+                  </label>
+                  <label>
+                    <span>Proxy Username (required)</span>
+                    <input type="text" value={vsPhoneProxy.account} onChange={(event) => setVsPhoneProxy((value) => ({ ...value, account: event.target.value }))} autoComplete="off" />
+                  </label>
+                  <label>
+                    <span>Proxy Password (required)</span>
+                    <input type="password" value={vsPhoneProxy.password} onChange={(event) => setVsPhoneProxy((value) => ({ ...value, password: event.target.value }))} autoComplete="new-password" />
+                  </label>
+                  <label>
+                    <span>Proxy Protocol</span>
+                    <select value={vsPhoneProxy.type} onChange={(event) => setVsPhoneProxy((value) => ({ ...value, type: event.target.value }))}>
+                      <option value="Socks5">Socks5</option>
+                      <option value="http">HTTP</option>
+                      <option value="https">HTTPS</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Country (optional)</span>
+                    <input type="text" value={vsPhoneProxy.country} onChange={(event) => setVsPhoneProxy((value) => ({ ...value, country: event.target.value }))} placeholder="US" />
+                  </label>
+                  <label>
+                    <span>Expected IP (optional)</span>
+                    <input type="text" value={vsPhoneProxy.ip} onChange={(event) => setVsPhoneProxy((value) => ({ ...value, ip: event.target.value }))} placeholder="156.228.84.62" />
+                  </label>
+                  <label>
+                    <span>Location (optional)</span>
+                    <input type="text" value={vsPhoneProxy.loc} onChange={(event) => setVsPhoneProxy((value) => ({ ...value, loc: event.target.value }))} placeholder="39.0438,-77.4874" />
+                  </label>
+                  <label>
+                    <span>City (optional)</span>
+                    <input type="text" value={vsPhoneProxy.city} onChange={(event) => setVsPhoneProxy((value) => ({ ...value, city: event.target.value }))} placeholder="Ashburn" />
+                  </label>
+                  <label>
+                    <span>Region (optional)</span>
+                    <input type="text" value={vsPhoneProxy.region} onChange={(event) => setVsPhoneProxy((value) => ({ ...value, region: event.target.value }))} placeholder="Virginia" />
+                  </label>
+                  <label>
+                    <span>Timezone (optional)</span>
+                    <input type="text" value={vsPhoneProxy.timezone} onChange={(event) => setVsPhoneProxy((value) => ({ ...value, timezone: event.target.value }))} placeholder="America/New_York" />
+                  </label>
+                </>
               ) : null}
               {vsPhoneMode === "automatic" ? (
                 <label>
@@ -1626,7 +1683,7 @@ export default function EarnappDevicesPage() {
                 <button
                   type="button"
                   className={`loadConfig ${vsPhoneAction === "replacement" ? "dangerButton" : ""}`}
-                  disabled={vsPhoneLoading || (!vsPhoneCredentialsSaved && (!vsPhoneAccessKey.trim() || !vsPhoneSecretKey.trim())) || (vsPhoneAction === "replacement" && !vsPhonePadCode.trim())}
+                  disabled={vsPhoneLoading || (!vsPhoneCredentialsSaved && (!vsPhoneAccessKey.trim() || !vsPhoneSecretKey.trim())) || (vsPhoneAction === "replacement" && !vsPhonePadCode.trim()) || (vsPhoneAction === "checkIP" && (!vsPhoneProxy.host.trim() || !vsPhoneProxy.port || !vsPhoneProxy.account.trim() || !vsPhoneProxy.password.trim()))}
                   onClick={() => {
                     if (vsPhoneAction === "replacement" && !window.confirm(`Replace VSPhone device ${vsPhonePadCode.trim()}? This operation changes the device assignment.`)) return;
                     void sendVsPhoneRequest();

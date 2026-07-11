@@ -1,7 +1,7 @@
 import { createHash, createHmac } from "node:crypto";
 import { NextResponse } from "next/server";
 
-type VsPhoneAction = "replacement" | "userPadList";
+type VsPhoneAction = "replacement" | "userPadList" | "checkIP";
 
 type VsPhoneRequest = {
   action?: unknown;
@@ -9,12 +9,14 @@ type VsPhoneRequest = {
   secretKey?: unknown;
   padCode?: unknown;
   equipmentIds?: unknown;
+  proxy?: unknown;
 };
 
 const VSPHONE_BASE_URL = "https://api.vsphone.com";
 const PATHS: Record<VsPhoneAction, string> = {
   replacement: "/vsphone/api/padApi/replacement",
   userPadList: "/vsphone/api/padApi/userPadList",
+  checkIP: "/vsphone/api/padApi/checkIP",
 };
 
 const V4_HOST = "api.vsphone.com";
@@ -79,7 +81,7 @@ function needsV4Fallback(response: Response, data: unknown) {
 
 export async function POST(request: Request) {
   const input = (await request.json().catch(() => ({}))) as VsPhoneRequest;
-  const action = input.action === "replacement" || input.action === "userPadList" ? input.action : null;
+  const action = input.action === "replacement" || input.action === "userPadList" || input.action === "checkIP" ? input.action : null;
   const enteredAccessKey = typeof input.accessKey === "string" ? input.accessKey.trim() : "";
   const enteredSecretKey = typeof input.secretKey === "string" ? input.secretKey.trim() : "";
   const accessKey = enteredAccessKey || getCookie(request, "vsphone-ak") || process.env.VSPHONE_ACCESS_KEY?.trim() || "";
@@ -103,10 +105,32 @@ export async function POST(request: Request) {
   }
 
   const path = PATHS[action];
-  const payload: { padCode?: string; equipmentIds?: number[] } = {};
+  const payload: Record<string, string | number | number[]> = {};
 
-  if (padCode) payload.padCode = padCode;
+  if (action !== "checkIP" && padCode) payload.padCode = padCode;
   if (action === "userPadList" && equipmentIds.length > 0) payload.equipmentIds = equipmentIds;
+
+  if (action === "checkIP") {
+    const proxy = input.proxy && typeof input.proxy === "object" ? input.proxy as Record<string, unknown> : {};
+    const requiredStrings = ["host", "account", "password", "type"] as const;
+    const port = typeof proxy.port === "number" ? proxy.port : Number(proxy.port);
+
+    for (const key of requiredStrings) {
+      const value = typeof proxy[key] === "string" ? proxy[key].trim() : "";
+      if (!value) return NextResponse.json({ error: `${key} is required for IP checking.` }, { status: 400 });
+      payload[key] = value;
+    }
+
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      return NextResponse.json({ error: "A valid proxy port is required for IP checking." }, { status: 400 });
+    }
+    payload.port = port;
+
+    for (const key of ["country", "ip", "loc", "city", "region", "timezone"] as const) {
+      const value = typeof proxy[key] === "string" ? proxy[key].trim() : "";
+      if (value) payload[key] = value;
+    }
+  }
   const body = JSON.stringify(payload);
   const timestamp = Math.floor(Date.now() / 1000).toString();
   const signature = createHash("sha256").update(`${secretKey}${timestamp}${path}${body}`, "utf8").digest("hex");
