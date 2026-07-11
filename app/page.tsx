@@ -452,6 +452,9 @@ export default function EarnappDevicesPage() {
   const [tab, setTab] = useState<Tab>("groups");
   const [ipCheckInput, setIpCheckInput] = useState("");
   const [checkedIp, setCheckedIp] = useState<string | null>(null);
+  const [ipInformation, setIpInformation] = useState<{ isp: string; city: string; region: string; country: string } | null>(null);
+  const [ipInformationLoading, setIpInformationLoading] = useState(false);
+  const [ipInformationError, setIpInformationError] = useState<string | null>(null);
   const [vsPhoneAction, setVsPhoneAction] = useState<VsPhoneAction>("userPadList");
   const [vsPhoneMode, setVsPhoneMode] = useState<"manual" | "automatic">("manual");
   const [vsPhoneAccessKey, setVsPhoneAccessKey] = useState("");
@@ -1206,10 +1209,35 @@ export default function EarnappDevicesPage() {
     return devices.filter((device) => device.ips.some((ip) => ip.trim().toLowerCase() === checkedIp));
   }, [checkedIp, devices]);
 
-  function checkIpAddress() {
+  async function checkIpAddress() {
     const normalizedIp = ipCheckInput.trim().toLowerCase();
 
-    setCheckedIp(normalizedIp || null);
+    setCheckedIp(null);
+    setIpInformation(null);
+    setIpInformationError(null);
+    if (!normalizedIp) return;
+
+    setIpInformationLoading(true);
+    try {
+      const response = await fetch("/api/ip-lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ip: normalizedIp }),
+      });
+      const result = await response.json() as { error?: string; isp?: string; city?: string; region?: string; country?: string };
+
+      if (!response.ok) {
+        setIpInformationError(result.error || "Failed to look up IP information.");
+        return;
+      }
+
+      setCheckedIp(normalizedIp);
+      setIpInformation({ isp: result.isp || "Unknown", city: result.city || "Unknown", region: result.region || "Unknown", country: result.country || "Unknown" });
+    } catch (lookupError) {
+      setIpInformationError(lookupError instanceof Error ? lookupError.message : "Failed to look up IP information.");
+    } finally {
+      setIpInformationLoading(false);
+    }
   }
 
   const watchlistRows = useMemo<WatchlistRow[]>(() => {
@@ -2148,7 +2176,7 @@ export default function EarnappDevicesPage() {
               className="ipCheckForm"
               onSubmit={(event) => {
                 event.preventDefault();
-                checkIpAddress();
+                void checkIpAddress();
               }}
             >
               <label>
@@ -2159,14 +2187,16 @@ export default function EarnappDevicesPage() {
                   onChange={(event) => {
                     setIpCheckInput(event.target.value);
                     setCheckedIp(null);
+                    setIpInformation(null);
+                    setIpInformationError(null);
                   }}
                   placeholder="Enter an IP address"
                   aria-label="IP address to check"
                 />
               </label>
-              <button type="submit" className="loadConfig" disabled={!ipCheckInput.trim()}>
+              <button type="submit" className="loadConfig" disabled={!ipCheckInput.trim() || ipInformationLoading}>
                 <Search size={17} />
-                Check
+                {ipInformationLoading ? "Checking..." : "Check"}
               </button>
             </form>
             {checkedIp ? (
@@ -2182,6 +2212,18 @@ export default function EarnappDevicesPage() {
                     ))}
                   </ul>
                 ) : null}
+              </div>
+            ) : null}
+            {ipInformationError ? <p className="errorMessage">{ipInformationError}</p> : null}
+            {ipInformation ? (
+              <div className="ipInformationPanel">
+                <h3>IP Information</h3>
+                <dl>
+                  <div><dt>ISP</dt><dd>{ipInformation.isp}</dd></div>
+                  <div><dt>City</dt><dd>{ipInformation.city}</dd></div>
+                  <div><dt>Region</dt><dd>{ipInformation.region}</dd></div>
+                  <div><dt>Country</dt><dd>{ipInformation.country}</dd></div>
+                </dl>
               </div>
             ) : null}
           </section>

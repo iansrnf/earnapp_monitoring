@@ -489,6 +489,39 @@ table {
   color: var(--offline);
 }
 
+.ipInformationPanel {
+  border: 1px solid rgba(125, 211, 252, 0.38);
+  background: rgba(40, 94, 139, 0.28);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.ipInformationPanel h3 {
+  margin: 0 0 14px;
+}
+
+.ipInformationPanel dl {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.ipInformationPanel dl div {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.ipInformationPanel dt {
+  color: var(--muted);
+}
+
+.ipInformationPanel dd {
+  margin: 0;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
 .vsPhoneGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
