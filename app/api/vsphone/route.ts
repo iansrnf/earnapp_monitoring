@@ -65,6 +65,21 @@ function getCookie(request: Request, name: string) {
   return item ? decodeURIComponent(item.slice(name.length + 1)) : "";
 }
 
+function getSavedVsPhoneCredentials(request: Request) {
+  try {
+    const encoded = getCookie(request, "vsphone-configs");
+    const activeId = getCookie(request, "vsphone-active-config");
+    const configs = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as Array<{ id?: unknown; accessKey?: unknown; secretKey?: unknown }>;
+    const active = configs.find((config) => config.id === activeId) ?? configs[0];
+    return {
+      accessKey: typeof active?.accessKey === "string" ? active.accessKey : "",
+      secretKey: typeof active?.secretKey === "string" ? active.secretKey : "",
+    };
+  } catch {
+    return { accessKey: "", secretKey: "" };
+  }
+}
+
 async function readResponse(response: Response) {
   const responseText = await response.text();
 
@@ -109,8 +124,9 @@ export async function POST(request: Request) {
   const action = input.action === "replacement" || input.action === "userPadList" || input.action === "checkIP" || input.action === "infos" || input.action === "screenshotGallery" ? input.action : null;
   const enteredAccessKey = typeof input.accessKey === "string" ? input.accessKey.trim() : "";
   const enteredSecretKey = typeof input.secretKey === "string" ? input.secretKey.trim() : "";
-  const accessKey = enteredAccessKey || getCookie(request, "vsphone-ak") || process.env.VSPHONE_ACCESS_KEY?.trim() || "";
-  const secretKey = enteredSecretKey || getCookie(request, "vsphone-sk") || process.env.VSPHONE_SECRET_KEY?.trim() || "";
+  const savedCredentials = getSavedVsPhoneCredentials(request);
+  const accessKey = enteredAccessKey || savedCredentials.accessKey || getCookie(request, "vsphone-ak") || process.env.VSPHONE_ACCESS_KEY?.trim() || "";
+  const secretKey = enteredSecretKey || savedCredentials.secretKey || getCookie(request, "vsphone-sk") || process.env.VSPHONE_SECRET_KEY?.trim() || "";
 
   if (!action) {
     return NextResponse.json({ error: "Select a supported VSPhone request." }, { status: 400 });

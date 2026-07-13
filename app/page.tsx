@@ -470,6 +470,9 @@ export default function EarnappDevicesPage() {
   const [vsPhoneAccessKey, setVsPhoneAccessKey] = useState("");
   const [vsPhoneSecretKey, setVsPhoneSecretKey] = useState("");
   const [vsPhoneCredentialsSaved, setVsPhoneCredentialsSaved] = useState(false);
+  const [vsPhoneCredentialConfigs, setVsPhoneCredentialConfigs] = useState<Array<{ id: string; name: string }>>([]);
+  const [vsPhoneCredentialConfigId, setVsPhoneCredentialConfigId] = useState("");
+  const [vsPhoneCredentialConfigName, setVsPhoneCredentialConfigName] = useState("");
   const [vsPhonePadCode, setVsPhonePadCode] = useState("");
   const [vsPhoneEquipmentIds, setVsPhoneEquipmentIds] = useState("");
   const [vsPhoneProxy, setVsPhoneProxy] = useState({ host: "", port: "", account: "", password: "", type: "Socks5", country: "", ip: "", loc: "", city: "", region: "", timezone: "" });
@@ -621,9 +624,9 @@ export default function EarnappDevicesPage() {
     const response = await fetch("/api/vsphone/credentials", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ accessKey: vsPhoneAccessKey, secretKey: vsPhoneSecretKey }),
+      body: JSON.stringify({ id: vsPhoneCredentialConfigId, name: vsPhoneCredentialConfigName, accessKey: vsPhoneAccessKey, secretKey: vsPhoneSecretKey }),
     });
-    const result = (await response.json()) as { saved?: boolean; error?: string };
+    const result = (await response.json()) as { saved?: boolean; activeId?: string; configs?: Array<{ id: string; name: string }>; error?: string };
 
     if (!response.ok) {
       setVsPhoneError(result.error ?? "Failed to save VSPhone credentials.");
@@ -631,14 +634,55 @@ export default function EarnappDevicesPage() {
     }
 
     setVsPhoneCredentialsSaved(Boolean(result.saved));
-  }, [vsPhoneAccessKey, vsPhoneSecretKey]);
+    setVsPhoneCredentialConfigs(result.configs ?? []);
+    setVsPhoneCredentialConfigId(result.activeId ?? "");
+    setVsPhoneCredentialConfigName(result.configs?.find((config) => config.id === result.activeId)?.name ?? vsPhoneCredentialConfigName);
+    setVsPhoneAccessKey("");
+    setVsPhoneSecretKey("");
+  }, [vsPhoneAccessKey, vsPhoneCredentialConfigId, vsPhoneCredentialConfigName, vsPhoneSecretKey]);
+
+  async function selectVsPhoneCredentialConfig(id: string) {
+    if (!id) {
+      setVsPhoneCredentialConfigId("");
+      setVsPhoneCredentialConfigName("");
+      setVsPhoneAccessKey("");
+      setVsPhoneSecretKey("");
+      return;
+    }
+
+    const response = await fetch("/api/vsphone/credentials", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
+    const result = await response.json() as { saved?: boolean; activeId?: string; configs?: Array<{ id: string; name: string }>; error?: string };
+    if (!response.ok) return setVsPhoneError(result.error ?? "Failed to select configuration.");
+
+    setVsPhoneCredentialsSaved(Boolean(result.saved));
+    setVsPhoneCredentialConfigs(result.configs ?? []);
+    setVsPhoneCredentialConfigId(result.activeId ?? "");
+    setVsPhoneCredentialConfigName(result.configs?.find((config) => config.id === result.activeId)?.name ?? "");
+    setVsPhoneAccessKey("");
+    setVsPhoneSecretKey("");
+  }
+
+  async function deleteVsPhoneCredentialConfig() {
+    if (!vsPhoneCredentialConfigId || !window.confirm(`Delete VSPhone configuration “${vsPhoneCredentialConfigName}”?`)) return;
+    const response = await fetch("/api/vsphone/credentials", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: vsPhoneCredentialConfigId }) });
+    const result = await response.json() as { saved?: boolean; activeId?: string; configs?: Array<{ id: string; name: string }> };
+    setVsPhoneCredentialsSaved(Boolean(result.saved));
+    setVsPhoneCredentialConfigs(result.configs ?? []);
+    setVsPhoneCredentialConfigId(result.activeId ?? "");
+    setVsPhoneCredentialConfigName(result.configs?.find((config) => config.id === result.activeId)?.name ?? "");
+  }
 
   useEffect(() => {
     const controller = new AbortController();
 
     void fetch("/api/vsphone/credentials", { signal: controller.signal })
       .then((response) => response.json())
-      .then((result: { saved?: boolean }) => setVsPhoneCredentialsSaved(Boolean(result.saved)))
+      .then((result: { saved?: boolean; activeId?: string; configs?: Array<{ id: string; name: string }> }) => {
+        setVsPhoneCredentialsSaved(Boolean(result.saved));
+        setVsPhoneCredentialConfigs(result.configs ?? []);
+        setVsPhoneCredentialConfigId(result.activeId ?? "");
+        setVsPhoneCredentialConfigName(result.configs?.find((config) => config.id === result.activeId)?.name ?? "");
+      })
       .catch(() => undefined);
 
     return () => controller.abort();
@@ -1632,6 +1676,17 @@ export default function EarnappDevicesPage() {
 
             <div className="vsPhoneGrid">
               <label>
+                <span>Saved Configuration</span>
+                <select value={vsPhoneCredentialConfigId} onChange={(event) => void selectVsPhoneCredentialConfig(event.target.value)}>
+                  <option value="">+ New configuration</option>
+                  {vsPhoneCredentialConfigs.map((config) => <option key={config.id} value={config.id}>{config.name}</option>)}
+                </select>
+              </label>
+              <label>
+                <span>Configuration Name</span>
+                <input type="text" value={vsPhoneCredentialConfigName} onChange={(event) => setVsPhoneCredentialConfigName(event.target.value)} placeholder="Example: Main Account" />
+              </label>
+              <label>
                 <span>API Request</span>
                 <select value={vsPhoneAction} onChange={(event) => {
                   const nextAction = event.target.value as VsPhoneAction;
@@ -1784,12 +1839,17 @@ export default function EarnappDevicesPage() {
               <button
                 type="button"
                 className="secondaryButton"
-                disabled={!vsPhoneAccessKey.trim() || !vsPhoneSecretKey.trim()}
+                disabled={!vsPhoneCredentialConfigName.trim() || (!vsPhoneCredentialConfigId && (!vsPhoneAccessKey.trim() || !vsPhoneSecretKey.trim()))}
                 onClick={() => void saveVsPhoneCredentials()}
               >
                 <Save size={17} />
-                {vsPhoneCredentialsSaved ? "Update Saved Keys" : "Save Keys"}
+                {vsPhoneCredentialConfigId ? "Update Config" : "Save New Config"}
               </button>
+              {vsPhoneCredentialConfigId ? (
+                <button type="button" className="secondaryButton dangerButton" onClick={() => void deleteVsPhoneCredentialConfig()}>
+                  <Trash2 size={17} /> Delete Config
+                </button>
+              ) : null}
               {vsPhoneMode === "manual" ? (
                 <button
                   type="button"
@@ -1817,7 +1877,7 @@ export default function EarnappDevicesPage() {
                   </span>
                 </div>
               )}
-              {vsPhoneCredentialsSaved ? <span className="vsPhoneSavedStatus"><Check size={15} /> Keys saved securely</span> : null}
+              {vsPhoneCredentialsSaved ? <span className="vsPhoneSavedStatus"><Check size={15} /> {vsPhoneCredentialConfigs.length} config{vsPhoneCredentialConfigs.length === 1 ? "" : "s"} saved securely</span> : null}
             </div>
 
             {vsPhoneError ? <p className="errorMessage">{vsPhoneError}</p> : null}
