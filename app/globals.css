@@ -655,6 +655,52 @@ table {
   overflow-wrap: anywhere;
 }
 
+.vsPhoneScreenshotGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 14px 8px;
+}
+
+.vsPhoneScreenshotGrid article {
+  min-width: 0;
+  text-align: center;
+}
+
+.vsPhoneScreenshotGrid img,
+.vsPhoneScreenshotMissing {
+  display: block;
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  background: #0d0f11;
+  border-radius: 4px;
+}
+
+.vsPhoneScreenshotMissing {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  padding: 12px;
+}
+
+.vsPhoneScreenshotGrid label {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.vsPhoneScreenshotGrid article > span {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .watchlistTable table {
   min-width: 1120px;
 }

@@ -1,7 +1,7 @@
 import { createHash, createHmac } from "node:crypto";
 import { NextResponse } from "next/server";
 
-type VsPhoneAction = "replacement" | "userPadList" | "checkIP" | "infos";
+type VsPhoneAction = "replacement" | "userPadList" | "checkIP" | "infos" | "screenshotGallery";
 
 type VsPhoneRequest = {
   action?: unknown;
@@ -19,6 +19,7 @@ const PATHS: Record<VsPhoneAction, string> = {
   userPadList: "/vsphone/api/padApi/userPadList",
   checkIP: "/vsphone/api/padApi/checkIP",
   infos: "/vsphone/api/padApi/infos",
+  screenshotGallery: "/vsphone/api/padApi/infos",
 };
 
 const V4_HOST = "api.vsphone.com";
@@ -81,9 +82,31 @@ function needsV4Fallback(response: Response, data: unknown) {
   return result.code === 2032 && typeof result.msg === "string" && result.msg.toLowerCase().includes("authorization");
 }
 
+async function callVsPhone(path: string, payload: unknown, accessKey: string, secretKey: string) {
+  const body = JSON.stringify(payload);
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const signature = createHash("sha256").update(`${secretKey}${timestamp}${path}${body}`, "utf8").digest("hex");
+  let authScheme = "V2";
+  let response = await fetch(`${VSPHONE_BASE_URL}${path}`, {
+    method: "POST",
+    cache: "no-store",
+    headers: { Accept: "application/json", "Content-Type": "application/json", "X-Access-Key": accessKey, "X-Timestamp": timestamp, "X-Sign": signature },
+    body,
+  });
+  let data = await readResponse(response);
+
+  if (needsV4Fallback(response, data)) {
+    authScheme = "V4 Java-compatible";
+    response = await fetch(`${VSPHONE_BASE_URL}${path}`, { method: "POST", cache: "no-store", headers: getV4Headers(accessKey, secretKey, body), body });
+    data = await readResponse(response);
+  }
+
+  return { response, data, authScheme };
+}
+
 export async function POST(request: Request) {
   const input = (await request.json().catch(() => ({}))) as VsPhoneRequest;
-  const action = input.action === "replacement" || input.action === "userPadList" || input.action === "checkIP" || input.action === "infos" ? input.action : null;
+  const action = input.action === "replacement" || input.action === "userPadList" || input.action === "checkIP" || input.action === "infos" || input.action === "screenshotGallery" ? input.action : null;
   const enteredAccessKey = typeof input.accessKey === "string" ? input.accessKey.trim() : "";
   const enteredSecretKey = typeof input.secretKey === "string" ? input.secretKey.trim() : "";
   const accessKey = enteredAccessKey || getCookie(request, "vsphone-ak") || process.env.VSPHONE_ACCESS_KEY?.trim() || "";
@@ -134,7 +157,7 @@ export async function POST(request: Request) {
     }
   }
 
-  if (action === "infos") {
+  if (action === "infos" || action === "screenshotGallery") {
     const infos = input.infos && typeof input.infos === "object" ? input.infos as Record<string, unknown> : {};
     const page = Number(infos.page);
     const rows = Number(infos.rows);
@@ -151,35 +174,26 @@ export async function POST(request: Request) {
       if (padCodes.length > 0) payload.padCodes = padCodes;
     }
   }
-  const body = JSON.stringify(payload);
-  const timestamp = Math.floor(Date.now() / 1000).toString();
-  const signature = createHash("sha256").update(`${secretKey}${timestamp}${path}${body}`, "utf8").digest("hex");
-
   try {
-    let authScheme = "V2";
-    let response = await fetch(`${VSPHONE_BASE_URL}${path}`, {
-      method: "POST",
-      cache: "no-store",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        "X-Access-Key": accessKey,
-        "X-Timestamp": timestamp,
-        "X-Sign": signature,
-      },
-      body,
-    });
-    let data = await readResponse(response);
+    const initialRequest = await callVsPhone(path, payload, accessKey, secretKey);
+    let { response, data, authScheme } = initialRequest;
 
-    if (needsV4Fallback(response, data)) {
-      authScheme = "V4 Java-compatible";
-      response = await fetch(`${VSPHONE_BASE_URL}${path}`, {
-        method: "POST",
-        cache: "no-store",
-        headers: getV4Headers(accessKey, secretKey, body),
-        body,
+    if (action === "screenshotGallery" && response.ok) {
+      const infosData = data && typeof data === "object" && "data" in data ? data.data : null;
+      const pageData = infosData && typeof infosData === "object" && "pageData" in infosData && Array.isArray(infosData.pageData) ? infosData.pageData : [];
+      const devices = pageData.flatMap((item) => {
+        if (!item || typeof item !== "object" || !("padCode" in item) || typeof item.padCode !== "string") return [];
+        const name = "padName" in item && typeof item.padName === "string" && item.padName ? item.padName : "remark" in item && typeof item.remark === "string" && item.remark ? item.remark : item.padCode;
+        return [{ padCode: item.padCode, name }];
       });
-      data = await readResponse(response);
+      const screenshotPath = "/vsphone/api/padApi/getLongGenerateUrl";
+      const screenshotRequest = await callVsPhone(screenshotPath, { padCodes: devices.map((device) => device.padCode), format: "png" }, accessKey, secretKey);
+      const screenshotData = screenshotRequest.data && typeof screenshotRequest.data === "object" && "data" in screenshotRequest.data && Array.isArray(screenshotRequest.data.data) ? screenshotRequest.data.data : [];
+      const urls = new Map(screenshotData.flatMap((item) => item && typeof item === "object" && "padCode" in item && "url" in item && typeof item.padCode === "string" && typeof item.url === "string" ? [[item.padCode, item.url] as const] : []));
+
+      response = screenshotRequest.response;
+      authScheme = screenshotRequest.authScheme;
+      data = { msg: response.ok ? "success" : "Screenshot request failed", code: response.status, data: devices.map((device) => ({ ...device, url: urls.get(device.padCode) || "" })) };
     }
 
     const upstreamMessage = data && typeof data === "object" && "msg" in data && typeof data.msg === "string" ? data.msg : "";

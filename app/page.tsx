@@ -91,7 +91,7 @@ type WatchlistRow = {
 };
 
 type Tab = "groups" | "devices" | "ip-duplication" | "ip-check" | "vsphone" | "forecast" | "watchlist" | "usage";
-type VsPhoneAction = "userPadList" | "replacement" | "checkIP" | "infos";
+type VsPhoneAction = "userPadList" | "replacement" | "checkIP" | "infos" | "screenshotGallery";
 type VsPhoneApiResult = {
   error?: string;
   data?: { msg?: unknown } | unknown;
@@ -102,6 +102,16 @@ function isVsPhoneSuccess(result: unknown) {
 
   const upstream = result.data;
   return Boolean(upstream && typeof upstream === "object" && "msg" in upstream && upstream.msg === "success");
+}
+
+function getVsPhoneGallery(result: unknown) {
+  if (!result || typeof result !== "object" || !("action" in result) || result.action !== "screenshotGallery" || !("data" in result)) return [];
+  const upstream = result.data;
+  if (!upstream || typeof upstream !== "object" || !("data" in upstream) || !Array.isArray(upstream.data)) return [];
+
+  return upstream.data.filter((item): item is { padCode: string; name: string; url: string } =>
+    Boolean(item && typeof item === "object" && "padCode" in item && typeof item.padCode === "string" && "name" in item && typeof item.name === "string" && "url" in item && typeof item.url === "string"),
+  );
 }
 type SortDirection = "asc" | "desc";
 type SortConfig = {
@@ -469,6 +479,7 @@ export default function EarnappDevicesPage() {
   const [vsPhoneLoading, setVsPhoneLoading] = useState(false);
   const [vsPhoneError, setVsPhoneError] = useState<string | null>(null);
   const [vsPhoneResult, setVsPhoneResult] = useState<unknown>(null);
+  const [selectedScreenshotPadCodes, setSelectedScreenshotPadCodes] = useState<string[]>([]);
   const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
   const [forecastDate, setForecastDate] = useState(getTodayDateInputValue);
   const [selectedDeviceUuids, setSelectedDeviceUuids] = useState<string[]>([]);
@@ -494,6 +505,7 @@ export default function EarnappDevicesPage() {
   const activeCookie = savedCookieExpiresAt ? savedCookie : "";
   const watchlistTargetUsageMs = getWatchlistTargetUsageMs(watchlistTargetUsageMinutes);
   const watchlistWindowMs = watchlistWindowHours * 60 * 60 * 1000;
+  const vsPhoneGallery = useMemo(() => getVsPhoneGallery(vsPhoneResult), [vsPhoneResult]);
 
   function unlockVsPhoneSuccessSound() {
     const AudioContextClass = window.AudioContext;
@@ -1631,6 +1643,7 @@ export default function EarnappDevicesPage() {
                   <option value="replacement">Device Replacement — POST /replacement</option>
                   <option value="checkIP">Smart IP Proxy Detection — POST /checkIP</option>
                   <option value="infos">Instance List — POST /infos</option>
+                  <option value="screenshotGallery">Screenshot Gallery — /infos + /getLongGenerateUrl</option>
                 </select>
               </label>
               <label>
@@ -1735,7 +1748,7 @@ export default function EarnappDevicesPage() {
                   </label>
                 </>
               ) : null}
-              {vsPhoneAction === "infos" ? (
+              {vsPhoneAction === "infos" || vsPhoneAction === "screenshotGallery" ? (
                 <>
                   <label>
                     <span>Page (required)</span>
@@ -1781,7 +1794,7 @@ export default function EarnappDevicesPage() {
                 <button
                   type="button"
                   className={`loadConfig ${vsPhoneAction === "replacement" ? "dangerButton" : ""}`}
-                  disabled={vsPhoneLoading || (!vsPhoneCredentialsSaved && (!vsPhoneAccessKey.trim() || !vsPhoneSecretKey.trim())) || (vsPhoneAction === "replacement" && !vsPhonePadCode.trim()) || (vsPhoneAction === "checkIP" && (!vsPhoneProxy.host.trim() || !vsPhoneProxy.port || !vsPhoneProxy.account.trim() || !vsPhoneProxy.password.trim())) || (vsPhoneAction === "infos" && (!vsPhoneInfos.page || !vsPhoneInfos.rows))}
+                  disabled={vsPhoneLoading || (!vsPhoneCredentialsSaved && (!vsPhoneAccessKey.trim() || !vsPhoneSecretKey.trim())) || (vsPhoneAction === "replacement" && !vsPhonePadCode.trim()) || (vsPhoneAction === "checkIP" && (!vsPhoneProxy.host.trim() || !vsPhoneProxy.port || !vsPhoneProxy.account.trim() || !vsPhoneProxy.password.trim())) || ((vsPhoneAction === "infos" || vsPhoneAction === "screenshotGallery") && (!vsPhoneInfos.page || !vsPhoneInfos.rows))}
                   onClick={() => {
                     if (vsPhoneAction === "replacement" && !window.confirm(`Replace VSPhone device ${vsPhonePadCode.trim()}? This operation changes the device assignment.`)) return;
                     void sendVsPhoneRequest();
@@ -1815,6 +1828,24 @@ export default function EarnappDevicesPage() {
               </div>
               <pre>{vsPhoneResult === null ? "No request sent yet." : JSON.stringify(vsPhoneResult, null, 2)}</pre>
             </div>
+            {vsPhoneGallery.length > 0 ? (
+              <div className="vsPhoneScreenshotGrid">
+                {vsPhoneGallery.map((item) => (
+                  <article key={item.padCode}>
+                    {item.url ? <img src={item.url} alt={`Live screenshot for ${item.name}`} /> : <div className="vsPhoneScreenshotMissing">Screenshot unavailable</div>}
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={selectedScreenshotPadCodes.includes(item.padCode)}
+                        onChange={() => setSelectedScreenshotPadCodes((current) => current.includes(item.padCode) ? current.filter((code) => code !== item.padCode) : [...current, item.padCode])}
+                      />
+                      <strong>{item.name}</strong>
+                    </label>
+                    <span className="mono">{item.padCode}</span>
+                  </article>
+                ))}
+              </div>
+            ) : null}
           </section>
         ) : tab === "forecast" ? (
           <section className="earnAppSection" aria-label="Earnapp forecast">
